@@ -12,12 +12,12 @@ python3 main.py list-strategies # ver estrategias disponibles
 pytest tests/ -v                # correr tests
 ```
 
-## Known Issues / Environment Notes
-- **Python 3.14**: El venv actual usa Python 3.14.2. `pandas-ta` y `numba` NO soportan 3.14 aun (requieren <3.14). Para Fase 2 (indicadores) hay dos opciones: (a) usar pyenv para instalar Python 3.12, o (b) implementar indicadores manualmente con pandas/numpy.
-- **TensorFlow**: No soporta Python 3.14. Se necesitara Python 3.10-3.12 para Fase 6 (ML). Considerar migrar venv a Python 3.12 antes de esa fase.
-- **backtesting.py**: Verificar compatibilidad con Python 3.14 antes de Fase 4.
-- **yfinance**: Funciona en 3.14. Probado exitosamente con SPY (daily) y BTC-USD (hourly).
-- **ccxt**: Instalado v4.5.37, funciona en 3.14.
+## Environment
+- **Python**: 3.12.3 (/usr/bin/python3.12) - Migrado desde 3.14 por compatibilidad con pandas-ta, numba, tensorflow
+- **venv**: `source venv/bin/activate` (Python 3.12, todas las dependencias core instaladas)
+- **pandas-ta**: 0.4.71b0 - Funciona correctamente. 26 columnas de indicadores verificadas con SPY 1d 365d
+- **TensorFlow**: Pendiente instalar (Phase 6). Compatible con Python 3.12
+- **yfinance**: 1.1.0 - Probado con SPY (daily) y BTC-USD (hourly)
 
 ## Project Structure
 ```
@@ -25,7 +25,7 @@ config/settings.py          # Configuracion central (tickers, parametros, ML con
 main.py                     # CLI entry point (Click) - 7 comandos
 data/fetcher.py             # [DONE] DataFetcher: yfinance + CCXT/Bitso
 data/processor.py           # [DONE] DataProcessor: limpieza y validacion
-indicators/technical.py     # [PENDING] TechnicalIndicators: 10+ indicadores
+indicators/technical.py     # [DONE] TechnicalIndicators: 12 indicadores via pandas-ta
 strategies/base.py          # [PENDING] BaseStrategy: clase abstracta
 strategies/scalping/        # [PENDING] MACDVWAPStrategy, RSIBBStrategy
 strategies/swing/           # [PENDING] MACrossoverStrategy
@@ -54,6 +54,21 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - `clean_data(df)` -> deduplica index, sort, ffill gaps (limit=3), drop NaN, clip volume >= 0
 - `validate_data(df)` -> verifica: columnas OHLCV, no vacio, DatetimeIndex, no NaN, high >= low
 - `save_processed(df, ticker, interval)` -> guarda en `data/processed/`
+
+### indicators/technical.py - TechnicalIndicators
+- `add_all_indicators(df)` -> agrega los 12 indicadores de golpe
+- `add_macd(df, fast, slow, signal)` -> macd, macd_signal, macd_histogram
+- `add_rsi(df, period)` -> rsi
+- `add_bollinger_bands(df, period, std_dev)` -> bb_upper, bb_middle, bb_lower, bb_bandwidth, bb_percent
+- `add_sma(df, period)` -> sma_{period} (default: sma_50, sma_200)
+- `add_ema(df, period)` -> ema_{period} (default: ema_50, ema_200)
+- `add_vwap(df)` -> vwap (con fallback para daily data)
+- `add_stochastic(df, period, smooth_k, smooth_d)` -> stoch_k, stoch_d
+- `add_adx(df, period)` -> adx, plus_di, minus_di
+- `add_atr(df, period)` -> atr
+- `add_obv(df)` -> obv
+- Total: 26 columnas (5 OHLCV + 21 indicadores). Todos usan params de config/settings.py
+- Tested: SPY 1d 251 rows -> all indicators computed correctly
 
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
@@ -104,11 +119,12 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - NO usar yfinance para produccion critica (se rompe frecuentemente con scraping)
 - NO commitear .env, API keys, modelos entrenados (.h5, .keras), ni data/raw/*.csv
 
-## Key Libraries (Installed)
+## Key Libraries (Installed - Python 3.12 venv)
 | Library | Version | Use | Status |
 |---------|---------|-----|--------|
 | pandas | 3.0.0 | DataFrames | OK |
-| numpy | 2.4.2 | Calculo numerico | OK |
+| numpy | 2.2.6 | Calculo numerico | OK |
+| pandas-ta | 0.4.71b0 | Indicadores tecnicos | OK, tested |
 | yfinance | 1.1.0 | Datos stocks/indices | OK, tested |
 | ccxt | 4.5.37 | Datos crypto (Bitso) | OK |
 | click | 8.3.1 | CLI framework | OK |
@@ -118,13 +134,12 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 | scikit-learn | 1.8.0 | Preprocessing ML | OK |
 | pytest | 9.0.2 | Testing | OK |
 
-## Libraries Pending Install (Python 3.14 incompatible)
-| Library | Issue | Needed For |
-|---------|-------|------------|
-| pandas-ta | numba requires Python <3.14 | Phase 2: Indicators |
-| tensorflow | requires Python 3.10-3.12 | Phase 6: ML Model |
-| backtesting.py | untested on 3.14 | Phase 4: Backtesting |
-| python-telegram-bot | untested on 3.14 | Phase 7: Telegram |
+## Libraries Pending Install
+| Library | Needed For | Notes |
+|---------|------------|-------|
+| tensorflow>=2.15 | Phase 6: ML Model | Compatible con Python 3.12 |
+| python-telegram-bot>=20.0 | Phase 7: Telegram | Verificar compatibilidad |
+| backtesting.py | Phase 4: Backtesting | Verificar compatibilidad |
 
 ## Recommended Reference Repos
 - `vercel-labs/agent-skills` - Patron AGENTS.md para contexto de agentes (formato de este archivo)
@@ -171,7 +186,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 ### Current Status
 - **DONE Phase 0**: requirements.txt updated (tensorflow, python-telegram-bot), config/settings.py updated (ML_CONFIG, TRANSFORMER_CONFIG)
 - **DONE Phase 1**: data/fetcher.py, data/processor.py, data/__init__.py, main.py fetch-data command connected and tested
-- **NEXT Phase 2**: Technical indicators module
+- **DONE Phase 2**: indicators/technical.py with 12 indicators (26 columns total). Migrated venv to Python 3.12
+- **NEXT Phase 3**: Trading strategies
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -182,16 +198,13 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - Modified `data/__init__.py`, `main.py` (fetch-data command working)
 - Verified: SPY 1d (21 rows), BTC-USD 1h (168 rows) fetched and saved successfully
 
-### Phase 2: Technical Indicators (`indicators/`) - NEXT
-**IMPORTANT**: pandas-ta no funciona en Python 3.14. Opciones:
-  (a) Implementar indicadores manualmente con pandas/numpy (mas trabajo pero sin dependencia problematica)
-  (b) Instalar Python 3.12 via pyenv y recrear venv
-Create: `indicators/technical.py` (TechnicalIndicators: macd, rsi, bb, vwap, sma, ema, stochastic, adx, atr, obv)
-Modify: `indicators/__init__.py`
-Depends: Phase 1
-Verify: Load SPY data -> add_all_indicators() -> check columns exist and values are reasonable
+### Phase 2: Technical Indicators (`indicators/`) - DONE
+- Migrated venv to Python 3.12.3 (from 3.14) for pandas-ta/numba compatibility
+- Created `indicators/technical.py` with TechnicalIndicators class (12 indicators, 21 new columns)
+- Modified `indicators/__init__.py`
+- Verified: SPY 1d 251 rows -> 26 columns (5 OHLCV + 21 indicators), all values reasonable
 
-### Phase 3: Trading Strategies (`strategies/`)
+### Phase 3: Trading Strategies (`strategies/`) - NEXT
 Create: `strategies/base.py`, `strategies/scalping/macd_vwap.py`, `strategies/scalping/rsi_bb.py`, `strategies/swing/ma_crossover.py`
 Modify: `strategies/__init__.py` (STRATEGY_MAP), `strategies/scalping/__init__.py`, `strategies/swing/__init__.py`
 Depends: Phase 2
@@ -229,8 +242,8 @@ Full E2E verification
 | Session | Phases | Description | Status |
 |---------|--------|-------------|--------|
 | 1 | 0 + 1 | Setup + Data fetching | DONE |
-| 2 | 2 | Technical indicators | NEXT |
-| 3 | 3 | Trading strategies | - |
+| 2 | 2 | Technical indicators | DONE |
+| 3 | 3 | Trading strategies | NEXT |
 | 4 | 4 | Backtesting engine | - |
 | 5 | 5 | Signal generator | - |
 | 6 | 6 | Hybrid ML model | - |
