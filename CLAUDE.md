@@ -5,40 +5,71 @@ Sistema hibrido de trading tecnico para CFDs. Genera senales automaticas (analis
 
 ## Setup Commands
 ```bash
-python -m venv venv && source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python main.py status          # verificar instalacion
-python main.py list-strategies # ver estrategias disponibles
-pytest tests/ -v               # correr tests
+python3 main.py status          # verificar instalacion
+python3 main.py list-strategies # ver estrategias disponibles
+pytest tests/ -v                # correr tests
 ```
+
+## Known Issues / Environment Notes
+- **Python 3.14**: El venv actual usa Python 3.14.2. `pandas-ta` y `numba` NO soportan 3.14 aun (requieren <3.14). Para Fase 2 (indicadores) hay dos opciones: (a) usar pyenv para instalar Python 3.12, o (b) implementar indicadores manualmente con pandas/numpy.
+- **TensorFlow**: No soporta Python 3.14. Se necesitara Python 3.10-3.12 para Fase 6 (ML). Considerar migrar venv a Python 3.12 antes de esa fase.
+- **backtesting.py**: Verificar compatibilidad con Python 3.14 antes de Fase 4.
+- **yfinance**: Funciona en 3.14. Probado exitosamente con SPY (daily) y BTC-USD (hourly).
+- **ccxt**: Instalado v4.5.37, funciona en 3.14.
 
 ## Project Structure
 ```
 config/settings.py          # Configuracion central (tickers, parametros, ML config)
 main.py                     # CLI entry point (Click) - 7 comandos
-data/fetcher.py             # DataFetcher: yfinance + CCXT/Bitso
-data/processor.py           # DataProcessor: limpieza y validacion
-indicators/technical.py     # TechnicalIndicators: 10+ indicadores via pandas-ta
-strategies/base.py          # BaseStrategy: clase abstracta
-strategies/scalping/        # MACDVWAPStrategy, RSIBBStrategy
-strategies/swing/           # MACrossoverStrategy
-backtesting/engine.py       # BacktestEngine: wrapper backtesting.py
-backtesting/metrics.py      # PerformanceMetrics: sharpe, drawdown, win_rate
-backtesting/report.py       # BacktestReport: HTML + plotly
-signals/generator.py        # SignalGenerator: datos -> indicadores -> estrategia -> senal
-signals/manager.py          # SignalManager: log CSV, historial, formato
-signals/telegram_bot.py     # TelegramNotifier: alertas moviles
-models/hybrid_model.py      # HybridLSTMTransformer: LSTM + Transformer encoder
-models/trainer.py           # ModelTrainer: prepare, train, evaluate, save/load
-models/predictor.py         # PricePredictor: filtro ML para senales
-tests/                      # pytest con fixtures en conftest.py
+data/fetcher.py             # [DONE] DataFetcher: yfinance + CCXT/Bitso
+data/processor.py           # [DONE] DataProcessor: limpieza y validacion
+indicators/technical.py     # [PENDING] TechnicalIndicators: 10+ indicadores
+strategies/base.py          # [PENDING] BaseStrategy: clase abstracta
+strategies/scalping/        # [PENDING] MACDVWAPStrategy, RSIBBStrategy
+strategies/swing/           # [PENDING] MACrossoverStrategy
+backtesting/engine.py       # [PENDING] BacktestEngine: wrapper backtesting.py
+backtesting/metrics.py      # [PENDING] PerformanceMetrics: sharpe, drawdown, win_rate
+backtesting/report.py       # [PENDING] BacktestReport: HTML + plotly
+signals/generator.py        # [PENDING] SignalGenerator: datos -> indicadores -> estrategia -> senal
+signals/manager.py          # [PENDING] SignalManager: log CSV, historial, formato
+signals/telegram_bot.py     # [PENDING] TelegramNotifier: alertas moviles
+models/hybrid_model.py      # [PENDING] HybridLSTMTransformer: LSTM + Transformer encoder
+models/trainer.py           # [PENDING] ModelTrainer: prepare, train, evaluate, save/load
+models/predictor.py         # [PENDING] PricePredictor: filtro ML para senales
+tests/                      # [PENDING] pytest con fixtures en conftest.py
 ```
+
+## Implemented Modules (Details)
+
+### data/fetcher.py - DataFetcher
+- `fetch_yfinance(ticker, interval, days)` -> DataFrame OHLCV. Tested: SPY 1d, BTC-USD 1h
+- `fetch_ccxt(symbol, timeframe, limit)` -> DataFrame OHLCV via CCXT. Lazy-loads exchange connection
+- `save_to_csv(df, ticker, interval)` -> guarda en `data/raw/{TICKER}_{interval}.csv`
+- `load_from_csv(ticker, interval)` -> carga desde `data/raw/`
+- `_normalize_columns(df)` -> flatten MultiIndex de yfinance, lowercase, valida OHLCV
+
+### data/processor.py - DataProcessor
+- `clean_data(df)` -> deduplica index, sort, ffill gaps (limit=3), drop NaN, clip volume >= 0
+- `validate_data(df)` -> verifica: columnas OHLCV, no vacio, DatetimeIndex, no NaN, high >= low
+- `save_processed(df, ticker, interval)` -> guarda en `data/processed/`
+
+### config/settings.py - Cambios Fase 0
+- `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
+- Nuevo `TRANSFORMER_CONFIG`: n_heads=2, d_model=64, ff_dim=128, transformer_dropout=0.1, dense_units=25
+- `LSTM_LAYERS`: quitado `dense1_units` (ahora en TRANSFORMER_CONFIG)
+
+### main.py - Comando fetch-data (lineas 77-93)
+- Conectado a DataFetcher + DataProcessor
+- Flujo: fetch -> clean -> validate -> save_to_csv
+- Soporta --source yfinance|bitso
 
 ## Code Style
 - Python 3.10+ con type hints
 - Clases con docstrings descriptivos
 - Parametros configurables desde `config/settings.py`, nunca hardcoded
-- Usar pandas-ta para indicadores, NO calculos manuales
+- Indicadores: usar pandas-ta si disponible, sino implementar con pandas/numpy
 - Logging via modulo `logging` (ya configurado en main.py)
 - Variables de entorno para secrets via python-dotenv (.env)
 
@@ -51,7 +82,7 @@ tests/                      # pytest con fixtures en conftest.py
 | Alertas | Terminal + Telegram bot | Senales consola + notificaciones moviles |
 | Crypto | Solo senales | Bitso NO soporta HFT/scalping |
 | Data | yfinance + CCXT | yfinance=stocks/indices, CCXT=crypto data |
-| Indicators | pandas-ta | 130+ indicadores, bien mantenido, MIT license |
+| Indicators | pandas-ta (o manual si Python 3.14) | 130+ indicadores, MIT license |
 | Plus500 | Manual execution | Plus500 NO tiene API |
 
 ## Do's and Don'ts
@@ -63,35 +94,52 @@ tests/                      # pytest con fixtures en conftest.py
 - Validar DataFrames antes de procesar (columnas OHLCV completas)
 - Usar `click.echo()` para output al usuario en CLI
 - Risk management: max 2% por trade, max 3 posiciones concurrentes
+- Usar `source venv/bin/activate` antes de ejecutar comandos
 
 ### Don't
 - NO hardcodear tickers, intervalos o parametros de estrategias
 - NO usar TFLite - usar TensorFlow completo (se corre en laptop)
 - NO automatizar ejecucion en Plus500 (no tiene API)
 - NO hacer HFT/scalping en Bitso (no lo soporta)
-- NO usar yfinance para produccion critica (se rompe frecuentemente)
-- NO commitear .env, API keys, o modelos entrenados (.h5, .keras)
+- NO usar yfinance para produccion critica (se rompe frecuentemente con scraping)
+- NO commitear .env, API keys, modelos entrenados (.h5, .keras), ni data/raw/*.csv
 
-## Key Libraries
-| Library | Use | Notes |
-|---------|-----|-------|
-| pandas-ta | Indicadores tecnicos | 130+ indicadores. Preferir sobre TA-Lib |
-| backtesting (backtesting.py) | Motor de backtesting | Wrapper en backtesting/engine.py |
-| yfinance | Datos stocks/indices/commodities | Datos OHLCV historicos |
-| ccxt | Datos crypto (Bitso) | Solo datos, NO ejecucion |
-| tensorflow>=2.15 | Modelo LSTM+Transformer | Keras API para el hibrido |
-| python-telegram-bot>=20.0 | Alertas Telegram | Async, v22.6+ |
-| plotly | Graficas backtesting | Equity curves en HTML reports |
-| scikit-learn | Preprocessing ML | MinMaxScaler, train_test_split |
+## Key Libraries (Installed)
+| Library | Version | Use | Status |
+|---------|---------|-----|--------|
+| pandas | 3.0.0 | DataFrames | OK |
+| numpy | 2.4.2 | Calculo numerico | OK |
+| yfinance | 1.1.0 | Datos stocks/indices | OK, tested |
+| ccxt | 4.5.37 | Datos crypto (Bitso) | OK |
+| click | 8.3.1 | CLI framework | OK |
+| python-dotenv | 1.2.1 | Variables de entorno | OK |
+| matplotlib | 3.10.8 | Graficas | OK |
+| plotly | 6.5.2 | Graficas interactivas | OK |
+| scikit-learn | 1.8.0 | Preprocessing ML | OK |
+| pytest | 9.0.2 | Testing | OK |
+
+## Libraries Pending Install (Python 3.14 incompatible)
+| Library | Issue | Needed For |
+|---------|-------|------------|
+| pandas-ta | numba requires Python <3.14 | Phase 2: Indicators |
+| tensorflow | requires Python 3.10-3.12 | Phase 6: ML Model |
+| backtesting.py | untested on 3.14 | Phase 4: Backtesting |
+| python-telegram-bot | untested on 3.14 | Phase 7: Telegram |
 
 ## Recommended Reference Repos
-- `vercel-labs/agent-skills` - Patron AGENTS.md para contexto de agentes
+- `vercel-labs/agent-skills` - Patron AGENTS.md para contexto de agentes (formato de este archivo)
 - `0xemmkty/QuantMuse` - Pipeline completo: data->indicadores->portfolio->backtesting->AI
 - `whchien/ai-trader` - Backtrader + CLI + 20 estrategias ejemplo
 - `nkaz001/hftbacktest` - Backtesting tick-level para scalping
 - `freqtrade/freqtrade` - Trading bot con integracion Telegram completa
 - `dcajasn/Riskfolio-Lib` - Portfolio optimization y risk management
 - `stefan-jansen/machine-learning-for-trading` - ML workflow para trading
+
+## Alternative Data Sources (for production, replace yfinance)
+- **Finnhub** (finnhub.io) - Real-time forex/stocks, 60 calls/min free tier
+- **Alpha Vantage** (alphavantage.co) - Multi-asset, built-in indicators, 5 calls/min free
+- **EODHD** (eodhd.com) - Historical tick data, stock screeners, best for backtesting
+- **Twelve Data** (twelvedata.com) - Global coverage, simple API
 
 ## Trading Research (2025-2026)
 
@@ -121,22 +169,27 @@ tests/                      # pytest con fixtures en conftest.py
 ## Implementation Plan (10 Phases)
 
 ### Current Status
-- DONE: Directory structure, config/settings.py, main.py (CLI scaffold), README.md, requirements.txt
-- PENDING: All business logic (16 new files, 12 files to modify)
+- **DONE Phase 0**: requirements.txt updated (tensorflow, python-telegram-bot), config/settings.py updated (ML_CONFIG, TRANSFORMER_CONFIG)
+- **DONE Phase 1**: data/fetcher.py, data/processor.py, data/__init__.py, main.py fetch-data command connected and tested
+- **NEXT Phase 2**: Technical indicators module
 
-### Phase 0: Dependencies Update
-Modify: `requirements.txt` (tensorflow-lite -> tensorflow, add python-telegram-bot), `config/settings.py` (Transformer params)
-Verify: `pip install -r requirements.txt`
+### Phase 0: Dependencies Update - DONE
+- `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
+- `config/settings.py`: LSTM_CONFIG -> ML_CONFIG, added TRANSFORMER_CONFIG (n_heads=2, d_model=64, ff_dim=128)
 
-### Phase 1: Data Module (`data/`)
-Create: `data/fetcher.py` (DataFetcher), `data/processor.py` (DataProcessor)
-Modify: `data/__init__.py`, `main.py:77-78` (connect fetch-data command)
-Verify: `python main.py fetch-data --ticker SPY --interval 1d --days 30`
+### Phase 1: Data Module (`data/`) - DONE
+- Created `data/fetcher.py` (DataFetcher), `data/processor.py` (DataProcessor)
+- Modified `data/__init__.py`, `main.py` (fetch-data command working)
+- Verified: SPY 1d (21 rows), BTC-USD 1h (168 rows) fetched and saved successfully
 
-### Phase 2: Technical Indicators (`indicators/`)
+### Phase 2: Technical Indicators (`indicators/`) - NEXT
+**IMPORTANT**: pandas-ta no funciona en Python 3.14. Opciones:
+  (a) Implementar indicadores manualmente con pandas/numpy (mas trabajo pero sin dependencia problematica)
+  (b) Instalar Python 3.12 via pyenv y recrear venv
 Create: `indicators/technical.py` (TechnicalIndicators: macd, rsi, bb, vwap, sma, ema, stochastic, adx, atr, obv)
 Modify: `indicators/__init__.py`
 Depends: Phase 1
+Verify: Load SPY data -> add_all_indicators() -> check columns exist and values are reasonable
 
 ### Phase 3: Trading Strategies (`strategies/`)
 Create: `strategies/base.py`, `strategies/scalping/macd_vwap.py`, `strategies/scalping/rsi_bb.py`, `strategies/swing/ma_crossover.py`
@@ -145,17 +198,18 @@ Depends: Phase 2
 
 ### Phase 4: Backtesting Engine (`backtesting/`)
 Create: `backtesting/engine.py`, `backtesting/metrics.py`, `backtesting/report.py`
-Modify: `backtesting/__init__.py`, `main.py:108-109`
+Modify: `backtesting/__init__.py`, `main.py` (backtest command)
 Depends: Phase 3 + Phase 1
 
 ### Phase 5: Signal Generator (`signals/`)
 Create: `signals/generator.py`, `signals/manager.py`
-Modify: `signals/__init__.py`, `main.py:138-139`
+Modify: `signals/__init__.py`, `main.py` (signal command)
 Depends: Phases 1+2+3
 
 ### Phase 6: Hybrid ML Model (`models/`)
+**IMPORTANT**: Requiere Python 3.10-3.12 para TensorFlow. Migrar venv antes de esta fase.
 Create: `models/hybrid_model.py` (LSTM 2x50 -> Transformer 2-head attention -> Dense -> sigmoid), `models/trainer.py`, `models/predictor.py`
-Modify: `models/__init__.py`, `config/settings.py`, `main.py:168-169`, `signals/generator.py` (--use-ml)
+Modify: `models/__init__.py`, `config/settings.py`, `main.py` (train-lstm command), `signals/generator.py` (--use-ml)
 Depends: Phases 1+2+5
 
 ### Phase 7: Telegram Alerts (`signals/`)
@@ -174,8 +228,8 @@ Full E2E verification
 
 | Session | Phases | Description | Status |
 |---------|--------|-------------|--------|
-| 1 | 0 + 1 | Setup + Data fetching | NEXT |
-| 2 | 2 | Technical indicators | - |
+| 1 | 0 + 1 | Setup + Data fetching | DONE |
+| 2 | 2 | Technical indicators | NEXT |
 | 3 | 3 | Trading strategies | - |
 | 4 | 4 | Backtesting engine | - |
 | 5 | 5 | Signal generator | - |

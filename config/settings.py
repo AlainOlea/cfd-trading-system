@@ -99,8 +99,8 @@ ADX_PARAMS = {
 # MACHINE LEARNING PARAMETERS
 # ============================================
 
-# LSTM Model Configuration
-LSTM_CONFIG = {
+# Hybrid LSTM+Transformer Model Configuration
+ML_CONFIG = {
     'lookback_window': 60,           # 60 timesteps (60 min for 1m data)
     'features': ['open', 'high', 'low', 'close', 'volume', 'rsi', 'macd', 'bb_upper', 'bb_lower'],
     'batch_size': 32,
@@ -111,12 +111,20 @@ LSTM_CONFIG = {
     'learning_rate': 0.001
 }
 
-# LSTM Architecture
+# LSTM Layers
 LSTM_LAYERS = {
     'lstm1_units': 50,
     'lstm2_units': 50,
-    'dense1_units': 25,
     'dropout_rate': 0.2
+}
+
+# Transformer Encoder
+TRANSFORMER_CONFIG = {
+    'n_heads': 2,                    # Multi-head attention heads
+    'd_model': 64,                   # Model dimension (must be divisible by n_heads)
+    'ff_dim': 128,                   # Feed-forward hidden dimension
+    'transformer_dropout': 0.1,
+    'dense_units': 25,               # Final dense layer before output
 }
 
 # Data normalization

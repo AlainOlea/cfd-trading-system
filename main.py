@@ -74,9 +74,30 @@ def fetch_data(ticker, interval, days, source):
         click.echo(f"   Days: {days}")
         click.echo(f"   Source: {source}")
 
-        # TODO: Implement data fetching
-        click.echo("\n⏳ This feature will be implemented in Phase 2 (Data Fetcher Module)")
-        logger.info(f"Data fetch requested for {ticker} ({interval}, {days}d)")
+        from data.fetcher import DataFetcher
+        from data.processor import DataProcessor
+
+        fetcher = DataFetcher()
+        processor = DataProcessor()
+
+        # Fetch data from selected source
+        if source == 'yfinance':
+            df = fetcher.fetch_yfinance(ticker, interval, days)
+        else:
+            df = fetcher.fetch_ccxt(ticker, interval, limit=days * 24)
+
+        # Clean and validate
+        df = processor.clean_data(df)
+        processor.validate_data(df)
+
+        # Save raw data
+        filepath = fetcher.save_to_csv(df, ticker, interval)
+
+        click.echo(f"\n✅ Data fetched successfully!")
+        click.echo(f"   Rows: {len(df)}")
+        click.echo(f"   Range: {df.index[0]} to {df.index[-1]}")
+        click.echo(f"   Saved to: {filepath}")
+        logger.info(f"Data fetch completed for {ticker} ({interval}, {days}d) -> {len(df)} rows")
 
     except Exception as e:
         click.echo(f"\n❌ Error fetching data: {str(e)}", err=True)
