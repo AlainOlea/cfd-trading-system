@@ -35,9 +35,9 @@ backtesting/report.py       # [DONE] BacktestReport: HTML + plotly (3-row: equit
 signals/generator.py        # [DONE] SignalGenerator + Signal dataclass: fetch -> indicators -> strategy -> signal
 signals/manager.py          # [DONE] SignalManager: log CSV, historial, formato terminal
 signals/telegram_bot.py     # [PENDING] TelegramNotifier: alertas moviles
-models/hybrid_model.py      # [PENDING] HybridLSTMTransformer: LSTM + Transformer encoder
-models/trainer.py           # [PENDING] ModelTrainer: prepare, train, evaluate, save/load
-models/predictor.py         # [PENDING] PricePredictor: filtro ML para senales
+models/hybrid_model.py      # [DONE] HybridLSTMTransformer: LSTM 2x50 -> Transformer 2-head -> Dense -> sigmoid
+models/trainer.py           # [DONE] ModelTrainer: prepare data, train, evaluate, save/load (weights + scaler + metadata)
+models/predictor.py         # [DONE] PricePredictor: load model, predict direction, filter signals
 tests/                      # [PENDING] pytest con fixtures en conftest.py
 ```
 
@@ -109,6 +109,24 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - `format_signal(signal)` -> formatted terminal block with entry/SL/TP/RR/confidence
 - `format_history(df)` -> tabular display of signal history
 
+### models/hybrid_model.py - HybridLSTMTransformer
+- `TransformerEncoderBlock` custom Keras layer: MultiHeadAttention + FFN + LayerNorm + residuals
+- `HybridLSTMTransformer.build(input_shape)` -> compiled Keras model. Architecture: Input -> LSTM(50) -> Dropout -> LSTM(50) -> Dropout -> Dense(d_model) -> TransformerEncoder -> GlobalAvgPool -> Dense(25) -> Dropout -> sigmoid
+- `predict(X)` -> bullish probability (0-1). Input shape: (1, lookback_window, n_features)
+- All hyperparams from config/settings.py (LSTM_LAYERS, TRANSFORMER_CONFIG, ML_CONFIG)
+
+### models/trainer.py - ModelTrainer
+- `prepare_data(df)` -> (X_train, y_train, X_test, y_test). Sliding windows of lookback_window. Labels: 1 if next close > current close. MinMaxScaler normalization. Chronological split (no shuffle)
+- `train(model, X_train, y_train)` -> history dict. EarlyStopping(patience=10) + ReduceLROnPlateau
+- `evaluate(model, X_test, y_test)` -> {loss, accuracy, precision, recall}
+- `save_model(model, ticker, interval)` -> saves weights.h5 + scaler.pkl + metadata.json to models/saved/{ticker}_{interval}/
+- `load_model(ticker, interval)` -> (model, scaler, metadata) tuple. Rebuilds architecture from metadata
+
+### models/predictor.py - PricePredictor
+- `load(ticker, interval)` -> loads model+scaler+metadata from disk
+- `predict_next(df)` -> {direction: BUY/SELL, confidence: 0-1, probability: raw sigmoid}
+- `filter_signal(signal_direction, prediction)` -> {accepted: bool, reason: str}. Rejects if ML disagrees or confidence < threshold
+
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
 - Nuevo `TRANSFORMER_CONFIG`: n_heads=2, d_model=64, ff_dim=128, transformer_dropout=0.1, dense_units=25
@@ -176,7 +194,7 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 ## Libraries Pending Install
 | Library | Needed For | Notes |
 |---------|------------|-------|
-| tensorflow>=2.15 | Phase 6: ML Model | Compatible con Python 3.12 |
+| tensorflow 2.20.0 | Phase 6: ML Model | Installed, CPU mode, tested OK |
 | python-telegram-bot>=20.0 | Phase 7: Telegram | Verificar compatibilidad |
 | vectorbt>=0.28 | Phase 4: Backtesting | Installed v0.28.4, tested OK |
 
@@ -229,7 +247,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 3**: 3 strategies implemented (MACD+VWAP: 21 signals, RSI+BB: 7 signals on SPY 1y). STRATEGY_MAP dict
 - **DONE Phase 4**: VectorBT backtesting engine, metrics, HTML reports. Tested all 3 strategies on SPY 1d
 - **DONE Phase 5**: SignalGenerator + SignalManager. CLI command `signal` connected. Logs to CSV
-- **NEXT Phase 6**: Hybrid ML model (LSTM+Transformer)
+- **DONE Phase 6**: Hybrid LSTM+Transformer model. 70,587 params. train-lstm + --use-ml working
+- **NEXT Phase 7**: Telegram bot alerts
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -267,11 +286,14 @@ Depends: Phase 2
 - Features: auto-days estimation per interval, ML filter hook (Phase 6), risk/reward ratio, signal history display
 - Tested: SPY 1d (macd_vwap, rsi_bb), BTC-USD 1h (macd_vwap). CSV log accumulates in logs/signals.csv
 
-### Phase 6: Hybrid ML Model (`models/`)
-**IMPORTANT**: Requiere Python 3.10-3.12 para TensorFlow. Migrar venv antes de esta fase.
-Create: `models/hybrid_model.py` (LSTM 2x50 -> Transformer 2-head attention -> Dense -> sigmoid), `models/trainer.py`, `models/predictor.py`
-Modify: `models/__init__.py`, `config/settings.py`, `main.py` (train-lstm command), `signals/generator.py` (--use-ml)
-Depends: Phases 1+2+5
+### Phase 6: Hybrid ML Model (`models/`) - DONE
+- TensorFlow 2.20.0 + Keras 3.13.2 installed (CPU mode, Python 3.12)
+- Created `models/hybrid_model.py` (HybridLSTMTransformer: LSTM 2x50 -> projection -> TransformerEncoderBlock 2-head -> GAP -> Dense -> sigmoid). 70,587 params
+- Created `models/trainer.py` (ModelTrainer: prepare_data with sliding windows + labels, train with EarlyStopping + ReduceLROnPlateau, evaluate with precision/recall, save/load model+scaler+metadata)
+- Created `models/predictor.py` (PricePredictor: load trained model, predict_next from DataFrame, filter_signal with confidence threshold)
+- Modified `models/__init__.py`, `main.py` (train-lstm command connected), `signals/generator.py` (--use-ml loads and applies model)
+- Tested: SPY 1d 20 epochs -> 44% accuracy (expected with only 140 train samples). Model saved to models/saved/SPY_1d/
+- --use-ml flag working: loads model, predicts, filters signal by direction + confidence
 
 ### Phase 7: Telegram Alerts (`signals/`)
 Create: `signals/telegram_bot.py` (TelegramNotifier)
@@ -294,6 +316,6 @@ Full E2E verification
 | 3 | 3 | Trading strategies | DONE |
 | 4 | 4 | Backtesting engine (VectorBT) | DONE |
 | 5 | 5 | Signal generator | DONE |
-| 6 | 6 | Hybrid ML model | NEXT |
-| 7 | 7 | Telegram bot | - |
+| 6 | 6 | Hybrid ML model (TF 2.20) | DONE |
+| 7 | 7 | Telegram bot | NEXT |
 | 8 | 8 + 9 | Tests + final integration | - |

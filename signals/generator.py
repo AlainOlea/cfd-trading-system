@@ -197,20 +197,21 @@ class SignalGenerator:
         try:
             from models.predictor import PricePredictor
             predictor = PricePredictor()
+            predictor.load(signal.ticker, signal.interval)
             prediction = predictor.predict_next(df)
 
             signal.ml_filtered = True
             signal.ml_confidence = prediction.get('confidence', 0)
 
-            # Only keep signal if ML agrees with direction
-            ml_direction = prediction.get('direction', 'HOLD')
-            if signal.direction != 'HOLD' and ml_direction != signal.direction:
-                logger.info(f"ML filter rejected signal: strategy={signal.direction}, ML={ml_direction}")
+            # Filter using the predictor's logic
+            filter_result = predictor.filter_signal(signal.direction, prediction)
+            if not filter_result['accepted']:
+                logger.info(f"ML filter rejected: {filter_result['reason']}")
                 signal.direction = 'HOLD'
                 signal.confidence = 0.0
 
-        except (ImportError, FileNotFoundError):
-            logger.warning("ML model not available. Signal passed without ML filter.")
+        except (ImportError, FileNotFoundError) as e:
+            logger.warning(f"ML model not available ({e}). Signal passed without ML filter.")
 
         return signal
 

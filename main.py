@@ -255,9 +255,61 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
         click.echo(f"   Batch Size: {batch_size}")
         click.echo(f"   Validation Split: {validation_split*100:.0f}%")
 
-        # TODO: Implement LSTM training
-        click.echo("\n⏳ This feature will be implemented in Phase 8 (LSTM Model)")
-        logger.info(f"LSTM training requested for {ticker}")
+        from data.fetcher import DataFetcher
+        from data.processor import DataProcessor
+        from indicators.technical import TechnicalIndicators
+        from models.hybrid_model import HybridLSTMTransformer
+        from models.trainer import ModelTrainer
+
+        # 1. Fetch data
+        fetcher = DataFetcher()
+        processor = DataProcessor()
+
+        try:
+            df = fetcher.load_from_csv(ticker, interval)
+            click.echo(f"   Loaded cached data: {len(df)} rows")
+        except FileNotFoundError:
+            click.echo(f"   Fetching data...")
+            df = fetcher.fetch_yfinance(ticker, interval, days=365)
+            df = processor.clean_data(df)
+            fetcher.save_to_csv(df, ticker, interval)
+            click.echo(f"   Fetched {len(df)} rows")
+
+        # 2. Add indicators (features for ML)
+        click.echo(f"   Computing indicators...")
+        df = TechnicalIndicators.add_all_indicators(df)
+
+        # 3. Prepare data
+        trainer = ModelTrainer(
+            epochs=epochs,
+            batch_size=batch_size,
+            validation_split=validation_split,
+        )
+        X_train, y_train, X_test, y_test = trainer.prepare_data(df)
+        click.echo(f"   Train samples: {len(X_train)}, Test samples: {len(X_test)}")
+
+        # 4. Build model
+        hybrid = HybridLSTMTransformer()
+        input_shape = (X_train.shape[1], X_train.shape[2])
+        hybrid.build(input_shape)
+        click.echo(f"   Model params: {hybrid.model.count_params():,}")
+
+        # 5. Train
+        click.echo(f"\n   Training...")
+        trainer.train(hybrid, X_train, y_train, epochs=epochs, batch_size=batch_size)
+
+        # 6. Evaluate
+        metrics = trainer.evaluate(hybrid, X_test, y_test)
+        click.echo(f"\n   Test Results:")
+        click.echo(f"   Accuracy:  {metrics['accuracy']:.4f}")
+        click.echo(f"   Precision: {metrics['precision']:.4f}")
+        click.echo(f"   Recall:    {metrics['recall']:.4f}")
+        click.echo(f"   Loss:      {metrics['loss']:.4f}")
+
+        # 7. Save model
+        model_dir = trainer.save_model(hybrid, ticker, interval)
+        click.echo(f"\n   Model saved to: {model_dir}")
+        logger.info(f"LSTM training completed for {ticker}: acc={metrics['accuracy']:.4f}")
 
     except Exception as e:
         click.echo(f"\n❌ Error training model: {str(e)}", err=True)
