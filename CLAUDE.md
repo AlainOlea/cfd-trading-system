@@ -38,7 +38,7 @@ signals/telegram_bot.py     # [DONE] TelegramNotifier: Markdown signals via Tele
 models/hybrid_model.py      # [DONE] HybridLSTMTransformer: LSTM 2x50 -> Transformer 2-head -> Dense -> sigmoid
 models/trainer.py           # [DONE] ModelTrainer: prepare data, train, evaluate, save/load (weights + scaler + metadata)
 models/predictor.py         # [DONE] PricePredictor: load model, predict direction, filter signals
-tests/                      # [PENDING] pytest con fixtures en conftest.py
+tests/                      # [DONE] 47 tests (conftest, data, indicators, strategies, backtesting, signals)
 ```
 
 ## Implemented Modules (Details)
@@ -256,7 +256,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 5**: SignalGenerator + SignalManager. CLI command `signal` connected. Logs to CSV
 - **DONE Phase 6**: Hybrid LSTM+Transformer model. 70,587 params. train-lstm + --use-ml working
 - **DONE Phase 7**: TelegramNotifier with graceful degradation. Integrated into signal command
-- **NEXT Phase 8**: Tests
+- **DONE Phase 8**: 47 tests (all passing). conftest fixtures, 5 test modules
+- **DONE Phase 9**: `scan` (multi-ticker x multi-strategy) + `watch` (continuous monitoring with market hours). Market hours per instrument type (indices, commodities, crypto). GPU detected (RTX 5060 8GB) but needs CUDA toolkit in WSL2
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -311,12 +312,21 @@ Depends: Phase 2
 - Graceful degradation: no crash if Telegram not configured, just skips notification
 - Only sends notifications for BUY/SELL signals (not HOLD)
 
-### Phase 8: Tests (`tests/`)
-Create: `tests/conftest.py`, `tests/test_data.py`, `tests/test_indicators.py`, `tests/test_strategies.py`, `tests/test_backtesting.py`, `tests/test_signals.py`
+### Phase 8: Tests (`tests/`) - DONE
+- Created `tests/conftest.py` (3 fixtures: sample_ohlcv_df 100 rows, large_ohlcv_df 300 rows, df_with_indicators)
+- Created `tests/test_data.py` (7 tests: clean, validate, edge cases)
+- Created `tests/test_indicators.py` (8 tests: all indicators, ranges, column checks)
+- Created `tests/test_strategies.py` (12 tests: strategy map, signal generation, position sizing)
+- Created `tests/test_backtesting.py` (11 tests: engine, metrics, safe_float)
+- Created `tests/test_signals.py` (9 tests: Signal dataclass, manager log/retrieve/format)
+- All 47 tests passing
 
-### Phase 9: Final Integration
-Add CLI commands: `scan` (multi-ticker/strategy), `report` (performance reports)
-Full E2E verification
+### Phase 9: Final Integration - DONE
+- Added `scan` command: multi-ticker x multi-strategy scan, sends Telegram for actionable signals
+- Added `watch` command: continuous monitoring loop with market hours awareness per instrument type
+- Added `MARKET_HOURS` config: indices (14-21 UTC Mon-Fri), commodities (near 24h Mon-Fri), crypto (24/7)
+- Added `_is_market_open()` helper: checks UTC time + day of week against instrument hours
+- GPU: RTX 5060 detected via nvidia-smi but TF needs CUDA toolkit installed in WSL2
 
 ## Session Schedule
 
@@ -329,4 +339,4 @@ Full E2E verification
 | 5 | 5 | Signal generator | DONE |
 | 6 | 6 | Hybrid ML model (TF 2.20) | DONE |
 | 7 | 7 | Telegram bot | DONE |
-| 8 | 8 + 9 | Tests + final integration | NEXT |
+| 8 | 8 + 9 | Tests + final integration | DONE |

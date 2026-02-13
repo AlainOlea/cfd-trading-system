@@ -59,9 +59,9 @@ class Signal:
             'stop_loss': self.stop_loss,
             'take_profit': self.take_profit,
             'confidence': self.confidence,
-            'risk_reward': self.risk_reward_ratio,
+            'risk_reward': self.risk_reward_ratio or '',
             'ml_filtered': self.ml_filtered,
-            'ml_confidence': self.ml_confidence,
+            'ml_confidence': self.ml_confidence if self.ml_confidence is not None else '',
         }
 
 

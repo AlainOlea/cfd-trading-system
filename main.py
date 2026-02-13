@@ -385,6 +385,162 @@ def status():
             click.echo(f"     • {f.name}")
 
 # ============================================
+# COMMAND: SCAN (multi-ticker, multi-strategy)
+# ============================================
+
+@cli.command('scan')
+@click.option('--strategies', default='macd_vwap,rsi_bb',
+              help='Comma-separated strategies to scan')
+@click.option('--tickers', default=None,
+              help='Comma-separated tickers (default: all configured)')
+@click.option('--interval', default='1d', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
+              help='Data interval')
+@click.option('--use-ml', is_flag=True, help='Use ML prediction filter')
+def scan(strategies, tickers, interval, use_ml):
+    """Scan multiple tickers with multiple strategies."""
+    try:
+        from config.settings import TICKERS
+        from signals.generator import SignalGenerator
+        from signals.manager import SignalManager
+        from signals.telegram_bot import TelegramNotifier
+
+        strategy_list = [s.strip() for s in strategies.split(',')]
+        if tickers:
+            ticker_list = [t.strip() for t in tickers.split(',')]
+        else:
+            ticker_list = [t for group in TICKERS.values() for t in group]
+
+        click.echo(f"\n🔍 Scanning {len(ticker_list)} tickers x {len(strategy_list)} strategies...")
+        click.echo(f"   Interval: {interval} | ML: {'ON' if use_ml else 'OFF'}")
+
+        generator = SignalGenerator()
+        manager = SignalManager()
+        notifier = TelegramNotifier()
+        actionable = []
+
+        for ticker in ticker_list:
+            for strat_name in strategy_list:
+                try:
+                    sig = generator.generate(strat_name, ticker, interval, use_ml=use_ml)
+                    manager.log_signal(sig)
+                    if sig.direction != 'HOLD':
+                        actionable.append(sig)
+                        click.echo(manager.format_signal(sig))
+                        if notifier.is_configured:
+                            notifier.send_signal(sig)
+                except Exception as e:
+                    click.echo(f"   SKIP {strat_name}/{ticker}: {e}", err=True)
+
+        click.echo(f"\n📊 Scan complete: {len(actionable)} actionable signals found")
+        if not actionable:
+            click.echo("   No BUY/SELL signals at this time.")
+
+    except Exception as e:
+        click.echo(f"\n❌ Error scanning: {str(e)}", err=True)
+        logger.error(f"Error scanning: {e}", exc_info=True)
+        sys.exit(1)
+
+# ============================================
+# COMMAND: WATCH (continuous monitoring)
+# ============================================
+
+@cli.command('watch')
+@click.option('--strategies', default='macd_vwap,rsi_bb',
+              help='Comma-separated strategies')
+@click.option('--tickers', default='SPY,GLD,BTC-USD',
+              help='Comma-separated tickers to monitor')
+@click.option('--interval', default='15m', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
+              help='Data interval')
+@click.option('--every', default=900, type=int,
+              help='Seconds between scans (default: 900 = 15 min)')
+@click.option('--use-ml', is_flag=True, help='Use ML prediction filter')
+def watch(strategies, tickers, interval, every, use_ml):
+    """Continuously monitor markets and send alerts. Press Ctrl+C to stop."""
+    import time
+    from config.settings import MARKET_HOURS, TICKERS as TICKER_GROUPS
+    from signals.generator import SignalGenerator
+    from signals.manager import SignalManager
+    from signals.telegram_bot import TelegramNotifier
+
+    strategy_list = [s.strip() for s in strategies.split(',')]
+    ticker_list = [t.strip() for t in tickers.split(',')]
+
+    # Build ticker -> category map for market hours
+    ticker_category = {}
+    for category, syms in TICKER_GROUPS.items():
+        for sym in syms:
+            ticker_category[sym] = category
+
+    generator = SignalGenerator()
+    manager = SignalManager()
+    notifier = TelegramNotifier()
+
+    click.echo(f"\n👁️  Watch mode started")
+    click.echo(f"   Tickers: {', '.join(ticker_list)}")
+    click.echo(f"   Strategies: {', '.join(strategy_list)}")
+    click.echo(f"   Interval: {interval}")
+    click.echo(f"   Scan every: {every}s ({every//60} min)")
+    click.echo(f"   ML Filter: {'ON' if use_ml else 'OFF'}")
+    click.echo(f"   Press Ctrl+C to stop\n")
+
+    scan_count = 0
+    try:
+        while True:
+            scan_count += 1
+            now = datetime.now(tz=__import__('datetime').timezone.utc).replace(tzinfo=None)
+            click.echo(f"--- Scan #{scan_count} at {now.strftime('%H:%M:%S UTC')} ---")
+
+            actionable_count = 0
+            for ticker in ticker_list:
+                # Check market hours
+                category = ticker_category.get(ticker, 'stocks')
+                hours = MARKET_HOURS.get(category, MARKET_HOURS['stocks'])
+
+                if not _is_market_open(now, hours):
+                    click.echo(f"   {ticker} ({category}): market closed")
+                    continue
+
+                for strat_name in strategy_list:
+                    try:
+                        sig = generator.generate(strat_name, ticker, interval, use_ml=use_ml)
+                        if sig.direction != 'HOLD':
+                            actionable_count += 1
+                            manager.log_signal(sig)
+                            click.echo(manager.format_signal(sig))
+                            if notifier.is_configured:
+                                notifier.send_signal(sig)
+                        else:
+                            click.echo(f"   {strat_name}/{ticker}: HOLD")
+                    except Exception as e:
+                        click.echo(f"   {strat_name}/{ticker}: ERROR - {e}")
+
+            if actionable_count == 0:
+                click.echo(f"   No actionable signals this scan.")
+
+            click.echo(f"   Next scan in {every}s...\n")
+            time.sleep(every)
+
+    except KeyboardInterrupt:
+        click.echo(f"\n\n⏹️  Watch stopped after {scan_count} scans")
+
+
+def _is_market_open(now: datetime, hours: dict) -> bool:
+    """Check if the market is currently open based on UTC time."""
+    if now.weekday() not in hours['days']:
+        return False
+
+    open_h = hours['open']
+    close_h = hours['close']
+
+    # Handle 24h markets (open=0, close=24) or wrap-around (open=23, close=22)
+    if close_h >= 24 or open_h > close_h:
+        return True  # Near-24h market, always open on valid days
+
+    current_hour = now.hour + now.minute / 60
+    return open_h <= current_hour < close_h
+
+
+# ============================================
 # MAIN
 # ============================================
 

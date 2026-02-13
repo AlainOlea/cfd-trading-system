@@ -30,8 +30,8 @@ class SignalManager:
         self._ensure_csv_exists()
 
     def _ensure_csv_exists(self) -> None:
-        """Create CSV with headers if it doesn't exist."""
-        if not self.log_file.exists():
+        """Create CSV with headers if it doesn't exist or is empty."""
+        if not self.log_file.exists() or self.log_file.stat().st_size == 0:
             with open(self.log_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(_CSV_HEADERS)

@@ -271,12 +271,18 @@ MAX_CONCURRENT_POSITIONS = 3
 # Minimum price movement for entry
 MIN_PRICE_MOVEMENT = 0.0001
 
-# Market hours (24-hour format)
-MARKET_OPEN_HOUR = 9
-MARKET_CLOSE_HOUR = 16
+# Market hours per instrument type (UTC, 24-hour format)
+# Plus500 CFD hours vary by instrument
+MARKET_HOURS = {
+    'indices': {'open': 14, 'close': 21, 'days': [0, 1, 2, 3, 4]},       # Mon-Fri 9:30-4 ET -> 14-21 UTC
+    'stocks': {'open': 14, 'close': 21, 'days': [0, 1, 2, 3, 4]},        # Mon-Fri 9:30-4 ET -> 14-21 UTC
+    'commodities': {'open': 23, 'close': 22, 'days': [0, 1, 2, 3, 4]},   # Near 24h Sun-Fri (gold, oil CFDs)
+    'crypto': {'open': 0, 'close': 24, 'days': [0, 1, 2, 3, 4, 5, 6]},   # 24/7
+}
 
-# Don't trade during these hours
-NO_TRADE_HOURS = [9.5, 10.0]  # Avoid opening bell volatility
+# Watch mode defaults
+WATCH_INTERVAL_SECONDS = 900  # 15 minutes default
+WATCH_STRATEGIES = ['macd_vwap', 'rsi_bb']  # Default strategies for watch mode
 
 print("✅ Configuration loaded successfully")
 print(f"📊 Backtesting capital: ${INITIAL_CAPITAL:,.0f}")
