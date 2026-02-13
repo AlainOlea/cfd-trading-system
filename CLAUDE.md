@@ -32,8 +32,8 @@ strategies/swing/           # [DONE] MACrossoverStrategy
 backtesting/engine.py       # [DONE] BacktestEngine: VectorBT Portfolio.from_signals()
 backtesting/metrics.py      # [DONE] PerformanceMetrics: sharpe, sortino, drawdown, win_rate, etc.
 backtesting/report.py       # [DONE] BacktestReport: HTML + plotly (3-row: equity, signals, drawdown)
-signals/generator.py        # [PENDING] SignalGenerator: datos -> indicadores -> estrategia -> senal
-signals/manager.py          # [PENDING] SignalManager: log CSV, historial, formato
+signals/generator.py        # [DONE] SignalGenerator + Signal dataclass: fetch -> indicators -> strategy -> signal
+signals/manager.py          # [DONE] SignalManager: log CSV, historial, formato terminal
 signals/telegram_bot.py     # [PENDING] TelegramNotifier: alertas moviles
 models/hybrid_model.py      # [PENDING] HybridLSTMTransformer: LSTM + Transformer encoder
 models/trainer.py           # [PENDING] ModelTrainer: prepare, train, evaluate, save/load
@@ -95,6 +95,19 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - 3-row plotly subplot: equity curve (blue), price + BUY/SELL markers (green/red triangles), drawdown % (red fill)
 - Title includes strategy, ticker, interval, return, win rate, trade count
 - Uses plotly_dark template, saves to results/ directory
+
+### signals/generator.py - SignalGenerator
+- `Signal` dataclass: direction, entry_price, stop_loss, take_profit, confidence, risk_reward_ratio, ml_filtered, to_dict()
+- `SignalGenerator.generate(strategy_name, ticker, interval, days, use_ml)` -> Signal. Full pipeline: fetch -> clean -> indicators -> strategy -> latest signal
+- `SignalGenerator.get_latest_actionable(strategy_name, ticker, interval, lookback)` -> Signal|None. Searches last N bars for BUY/SELL
+- `_apply_ml_filter(signal, df)` -> graceful degradation if ML model not available (Phase 6 hook)
+- `_estimate_days(interval)` -> auto-calculates days for sufficient indicator warmup (1m=7d, 5m=30d, 1h=90d, 1d=365d)
+
+### signals/manager.py - SignalManager
+- `log_signal(signal)` -> appends to logs/signals.csv (DictWriter, 12 columns)
+- `get_history(ticker, n)` -> DataFrame with last N signals (optional ticker filter)
+- `format_signal(signal)` -> formatted terminal block with entry/SL/TP/RR/confidence
+- `format_history(df)` -> tabular display of signal history
 
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
@@ -215,7 +228,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 2**: indicators/technical.py with 12 indicators (26 columns total). Migrated venv to Python 3.12
 - **DONE Phase 3**: 3 strategies implemented (MACD+VWAP: 21 signals, RSI+BB: 7 signals on SPY 1y). STRATEGY_MAP dict
 - **DONE Phase 4**: VectorBT backtesting engine, metrics, HTML reports. Tested all 3 strategies on SPY 1d
-- **NEXT Phase 5**: Signal generator
+- **DONE Phase 5**: SignalGenerator + SignalManager. CLI command `signal` connected. Logs to CSV
+- **NEXT Phase 6**: Hybrid ML model (LSTM+Transformer)
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -246,10 +260,12 @@ Depends: Phase 2
 - Tested: MACD+VWAP (8 trades, 7.16% return), RSI+BB (1 trade, 21.91%), MA Crossover (0 trades - expected on 1y daily)
 - Reports saved to `results/backtest_{strategy}_{ticker}_{interval}.html`
 
-### Phase 5: Signal Generator (`signals/`)
-Create: `signals/generator.py`, `signals/manager.py`
-Modify: `signals/__init__.py`, `main.py` (signal command)
-Depends: Phases 1+2+3
+### Phase 5: Signal Generator (`signals/`) - DONE
+- Created `signals/generator.py` (Signal dataclass + SignalGenerator: fetch -> clean -> indicators -> strategy -> signal)
+- Created `signals/manager.py` (SignalManager: CSV log, history retrieval, terminal formatting)
+- Modified `signals/__init__.py`, `main.py` (signal command fully connected)
+- Features: auto-days estimation per interval, ML filter hook (Phase 6), risk/reward ratio, signal history display
+- Tested: SPY 1d (macd_vwap, rsi_bb), BTC-USD 1h (macd_vwap). CSV log accumulates in logs/signals.csv
 
 ### Phase 6: Hybrid ML Model (`models/`)
 **IMPORTANT**: Requiere Python 3.10-3.12 para TensorFlow. Migrar venv antes de esta fase.
@@ -277,7 +293,7 @@ Full E2E verification
 | 2 | 2 | Technical indicators | DONE |
 | 3 | 3 | Trading strategies | DONE |
 | 4 | 4 | Backtesting engine (VectorBT) | DONE |
-| 5 | 5 | Signal generator | NEXT |
-| 6 | 6 | Hybrid ML model | - |
+| 5 | 5 | Signal generator | DONE |
+| 6 | 6 | Hybrid ML model | NEXT |
 | 7 | 7 | Telegram bot | - |
 | 8 | 8 + 9 | Tests + final integration | - |

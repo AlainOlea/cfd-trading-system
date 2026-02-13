@@ -203,9 +203,31 @@ def signal(strategy, ticker, interval, use_ml):
         if use_ml:
             click.echo(f"   ML Filter: ✅ Enabled")
 
-        # TODO: Implement signal generation
-        click.echo("\n⏳ This feature will be implemented in Phase 6 (Signal Generator)")
-        logger.info(f"Signal generation requested: {strategy} on {ticker}")
+        from signals.generator import SignalGenerator
+        from signals.manager import SignalManager
+
+        generator = SignalGenerator()
+        manager = SignalManager()
+
+        # Generate signal
+        signal = generator.generate(
+            strategy_name=strategy,
+            ticker=ticker,
+            interval=interval,
+            use_ml=use_ml,
+        )
+
+        # Log and display
+        manager.log_signal(signal)
+        click.echo(manager.format_signal(signal))
+
+        # Show recent history
+        history = manager.get_history(ticker=ticker, n=5)
+        if len(history) > 1:
+            click.echo(f"\n  Recent signals for {ticker}:")
+            click.echo(manager.format_history(history))
+
+        logger.info(f"Signal generated: {signal.direction} {ticker} @ {signal.entry_price:.2f}")
 
     except Exception as e:
         click.echo(f"\n❌ Error generating signals: {str(e)}", err=True)
