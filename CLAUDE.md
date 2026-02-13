@@ -29,9 +29,9 @@ indicators/technical.py     # [DONE] TechnicalIndicators: 12 indicadores via pan
 strategies/base.py          # [DONE] BaseStrategy: clase abstracta + position sizing
 strategies/scalping/        # [DONE] MACDVWAPStrategy, RSIBBStrategy
 strategies/swing/           # [DONE] MACrossoverStrategy
-backtesting/engine.py       # [PENDING] BacktestEngine: wrapper backtesting.py
-backtesting/metrics.py      # [PENDING] PerformanceMetrics: sharpe, drawdown, win_rate
-backtesting/report.py       # [PENDING] BacktestReport: HTML + plotly
+backtesting/engine.py       # [DONE] BacktestEngine: VectorBT Portfolio.from_signals()
+backtesting/metrics.py      # [DONE] PerformanceMetrics: sharpe, sortino, drawdown, win_rate, etc.
+backtesting/report.py       # [DONE] BacktestReport: HTML + plotly (3-row: equity, signals, drawdown)
 signals/generator.py        # [PENDING] SignalGenerator: datos -> indicadores -> estrategia -> senal
 signals/manager.py          # [PENDING] SignalManager: log CSV, historial, formato
 signals/telegram_bot.py     # [PENDING] TelegramNotifier: alertas moviles
@@ -78,6 +78,24 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - `strategies/__init__.py` - STRATEGY_MAP = {'macd_vwap': ..., 'rsi_bb': ..., 'ma_crossover': ...}
 - Signal columns added: signal (BUY/SELL/HOLD), entry_price, stop_loss, take_profit, confidence (0-1)
 
+### backtesting/engine.py - BacktestEngine
+- `BacktestResult` dataclass: strategy_name, ticker, interval, portfolio (vbt.Portfolio), signals_df, initial_capital
+- `BacktestEngine(initial_capital, commission, slippage)` uses config/settings.py defaults
+- `run(strategy, df, ticker, interval)` -> BacktestResult. Uses VectorBT Portfolio.from_signals()
+- `_interval_to_freq(interval)` -> pandas frequency string for VectorBT
+
+### backtesting/metrics.py - PerformanceMetrics
+- `calculate_all(result)` -> dict with 17 metrics: return, trades, win_rate, sharpe, sortino, drawdown, profit_factor, expectancy, best/worst/avg trades, consecutive wins/losses, avg duration
+- `format_summary(metrics)` -> formatted terminal string
+- `_safe_float(value, default)` -> handles NaN/inf from VectorBT stats
+- `_max_consecutive(mask)` -> counts max consecutive True in boolean series
+
+### backtesting/report.py - BacktestReport
+- `generate_html(result, metrics)` -> HTML file path
+- 3-row plotly subplot: equity curve (blue), price + BUY/SELL markers (green/red triangles), drawdown % (red fill)
+- Title includes strategy, ticker, interval, return, win rate, trade count
+- Uses plotly_dark template, saves to results/ directory
+
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
 - Nuevo `TRANSFORMER_CONFIG`: n_heads=2, d_model=64, ff_dim=128, transformer_dropout=0.1, dense_units=25
@@ -101,7 +119,7 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 | Decision | Choice | Reason |
 |----------|--------|--------|
 | ML Model | Hibrido LSTM+Transformer | ~95.9% accuracy. TensorFlow completo en laptop |
-| Backtesting | backtesting.py | Facil, suficiente para prototipado. En requirements |
+| Backtesting | VectorBT | 1000x faster, ideal para scalping. Portfolio.from_signals() |
 | Alertas | Terminal + Telegram bot | Senales consola + notificaciones moviles |
 | Crypto | Solo senales | Bitso NO soporta HFT/scalping |
 | Data | yfinance + CCXT | yfinance=stocks/indices, CCXT=crypto data |
@@ -147,7 +165,7 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 |---------|------------|-------|
 | tensorflow>=2.15 | Phase 6: ML Model | Compatible con Python 3.12 |
 | python-telegram-bot>=20.0 | Phase 7: Telegram | Verificar compatibilidad |
-| backtesting.py | Phase 4: Backtesting | Verificar compatibilidad |
+| vectorbt>=0.28 | Phase 4: Backtesting | Installed v0.28.4, tested OK |
 
 ## Recommended Reference Repos
 - `vercel-labs/agent-skills` - Patron AGENTS.md para contexto de agentes (formato de este archivo)
@@ -196,7 +214,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 1**: data/fetcher.py, data/processor.py, data/__init__.py, main.py fetch-data command connected and tested
 - **DONE Phase 2**: indicators/technical.py with 12 indicators (26 columns total). Migrated venv to Python 3.12
 - **DONE Phase 3**: 3 strategies implemented (MACD+VWAP: 21 signals, RSI+BB: 7 signals on SPY 1y). STRATEGY_MAP dict
-- **NEXT Phase 4**: Backtesting engine
+- **DONE Phase 4**: VectorBT backtesting engine, metrics, HTML reports. Tested all 3 strategies on SPY 1d
+- **NEXT Phase 5**: Signal generator
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -218,10 +237,14 @@ Create: `strategies/base.py`, `strategies/scalping/macd_vwap.py`, `strategies/sc
 Modify: `strategies/__init__.py` (STRATEGY_MAP), `strategies/scalping/__init__.py`, `strategies/swing/__init__.py`
 Depends: Phase 2
 
-### Phase 4: Backtesting Engine (`backtesting/`) - NEXT
-Create: `backtesting/engine.py`, `backtesting/metrics.py`, `backtesting/report.py`
-Modify: `backtesting/__init__.py`, `main.py` (backtest command)
-Depends: Phase 3 + Phase 1
+### Phase 4: Backtesting Engine (`backtesting/`) - DONE
+- Switched from backtesting.py to **VectorBT** (1000x faster, ideal for scalping)
+- Created `backtesting/engine.py` (BacktestEngine + BacktestResult dataclass, uses Portfolio.from_signals())
+- Created `backtesting/metrics.py` (PerformanceMetrics: 17 metrics, NaN/inf safe, formatted terminal summary)
+- Created `backtesting/report.py` (BacktestReport: 3-row plotly HTML - equity curve, price+signals, drawdown)
+- Modified `backtesting/__init__.py`, `main.py` (backtest command fully connected)
+- Tested: MACD+VWAP (8 trades, 7.16% return), RSI+BB (1 trade, 21.91%), MA Crossover (0 trades - expected on 1y daily)
+- Reports saved to `results/backtest_{strategy}_{ticker}_{interval}.html`
 
 ### Phase 5: Signal Generator (`signals/`)
 Create: `signals/generator.py`, `signals/manager.py`
@@ -253,8 +276,8 @@ Full E2E verification
 | 1 | 0 + 1 | Setup + Data fetching | DONE |
 | 2 | 2 | Technical indicators | DONE |
 | 3 | 3 | Trading strategies | DONE |
-| 4 | 4 | Backtesting engine | NEXT |
-| 5 | 5 | Signal generator | - |
+| 4 | 4 | Backtesting engine (VectorBT) | DONE |
+| 5 | 5 | Signal generator | NEXT |
 | 6 | 6 | Hybrid ML model | - |
 | 7 | 7 | Telegram bot | - |
 | 8 | 8 + 9 | Tests + final integration | - |

@@ -126,9 +126,56 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital):
         click.echo(f"   Interval: {interval}")
         click.echo(f"   Capital: ${initial_capital:,.0f}")
 
-        # TODO: Implement backtesting
-        click.echo("\n⏳ This feature will be implemented in Phase 5 (Backtesting Engine)")
-        logger.info(f"Backtest requested: {strategy} on {ticker} ({interval})")
+        from data.fetcher import DataFetcher
+        from data.processor import DataProcessor
+        from indicators.technical import TechnicalIndicators
+        from strategies import STRATEGY_MAP
+        from backtesting.engine import BacktestEngine
+        from backtesting.metrics import PerformanceMetrics
+        from backtesting.report import BacktestReport
+
+        # 1. Load or fetch data
+        fetcher = DataFetcher()
+        processor = DataProcessor()
+
+        try:
+            df = fetcher.load_from_csv(ticker, interval)
+            click.echo(f"   Loaded cached data: {len(df)} rows")
+        except FileNotFoundError:
+            click.echo(f"   No cached data found, fetching...")
+            df = fetcher.fetch_yfinance(ticker, interval, days=365)
+            df = processor.clean_data(df)
+            fetcher.save_to_csv(df, ticker, interval)
+            click.echo(f"   Fetched {len(df)} rows")
+
+        # Filter by date range if provided
+        if start_date:
+            df = df[df.index >= start_date]
+        if end_date:
+            df = df[df.index <= end_date]
+
+        # 2. Add indicators
+        click.echo(f"   Computing indicators...")
+        df = TechnicalIndicators.add_all_indicators(df)
+
+        # 3. Initialize strategy and engine
+        strategy_cls = STRATEGY_MAP[strategy]
+        strat = strategy_cls()
+        engine = BacktestEngine(initial_capital=initial_capital)
+
+        # 4. Run backtest
+        click.echo(f"   Running simulation...")
+        result = engine.run(strat, df, ticker=ticker, interval=interval)
+
+        # 5. Calculate metrics
+        metrics = PerformanceMetrics.calculate_all(result)
+        summary = PerformanceMetrics.format_summary(metrics)
+        click.echo(summary)
+
+        # 6. Generate HTML report
+        report_path = BacktestReport.generate_html(result, metrics)
+        click.echo(f"\n📄 HTML report saved to: {report_path}")
+        logger.info(f"Backtest completed: {strategy} on {ticker} ({interval})")
 
     except Exception as e:
         click.echo(f"\n❌ Error running backtest: {str(e)}", err=True)
