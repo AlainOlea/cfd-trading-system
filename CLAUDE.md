@@ -34,7 +34,7 @@ backtesting/metrics.py      # [DONE] PerformanceMetrics: sharpe, sortino, drawdo
 backtesting/report.py       # [DONE] BacktestReport: HTML + plotly (3-row: equity, signals, drawdown)
 signals/generator.py        # [DONE] SignalGenerator + Signal dataclass: fetch -> indicators -> strategy -> signal
 signals/manager.py          # [DONE] SignalManager: log CSV, historial, formato terminal
-signals/telegram_bot.py     # [PENDING] TelegramNotifier: alertas moviles
+signals/telegram_bot.py     # [DONE] TelegramNotifier: Markdown signals via Telegram bot
 models/hybrid_model.py      # [DONE] HybridLSTMTransformer: LSTM 2x50 -> Transformer 2-head -> Dense -> sigmoid
 models/trainer.py           # [DONE] ModelTrainer: prepare data, train, evaluate, save/load (weights + scaler + metadata)
 models/predictor.py         # [DONE] PricePredictor: load model, predict direction, filter signals
@@ -108,6 +108,13 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - `get_history(ticker, n)` -> DataFrame with last N signals (optional ticker filter)
 - `format_signal(signal)` -> formatted terminal block with entry/SL/TP/RR/confidence
 - `format_history(df)` -> tabular display of signal history
+
+### signals/telegram_bot.py - TelegramNotifier
+- `send_signal(signal)` -> sends Markdown-formatted signal to Telegram chat. Only if enabled + configured
+- `send_alert(message)` -> sends generic alert message
+- `_format_signal_message(signal)` -> Markdown with emoji, entry/SL/TP/RR/confidence, ML info
+- `is_configured` property: checks BOT_TOKEN and CHAT_ID are set
+- Graceful degradation: returns False silently if not configured
 
 ### models/hybrid_model.py - HybridLSTMTransformer
 - `TransformerEncoderBlock` custom Keras layer: MultiHeadAttention + FFN + LayerNorm + residuals
@@ -195,7 +202,7 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 | Library | Needed For | Notes |
 |---------|------------|-------|
 | tensorflow 2.20.0 | Phase 6: ML Model | Installed, CPU mode, tested OK |
-| python-telegram-bot>=20.0 | Phase 7: Telegram | Verificar compatibilidad |
+| python-telegram-bot 22.6 | Phase 7: Telegram | Installed, tested OK |
 | vectorbt>=0.28 | Phase 4: Backtesting | Installed v0.28.4, tested OK |
 
 ## Recommended Reference Repos
@@ -248,7 +255,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 4**: VectorBT backtesting engine, metrics, HTML reports. Tested all 3 strategies on SPY 1d
 - **DONE Phase 5**: SignalGenerator + SignalManager. CLI command `signal` connected. Logs to CSV
 - **DONE Phase 6**: Hybrid LSTM+Transformer model. 70,587 params. train-lstm + --use-ml working
-- **NEXT Phase 7**: Telegram bot alerts
+- **DONE Phase 7**: TelegramNotifier with graceful degradation. Integrated into signal command
+- **NEXT Phase 8**: Tests
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -295,10 +303,13 @@ Depends: Phase 2
 - Tested: SPY 1d 20 epochs -> 44% accuracy (expected with only 140 train samples). Model saved to models/saved/SPY_1d/
 - --use-ml flag working: loads model, predicts, filters signal by direction + confidence
 
-### Phase 7: Telegram Alerts (`signals/`)
-Create: `signals/telegram_bot.py` (TelegramNotifier)
-Modify: `config/settings.py`, `signals/generator.py`, `.env.example`
-Depends: Phase 5
+### Phase 7: Telegram Alerts (`signals/`) - DONE
+- Installed python-telegram-bot 22.6
+- Created `signals/telegram_bot.py` (TelegramNotifier: send_signal, send_alert, Markdown formatting)
+- Modified `signals/__init__.py`, `main.py` (signal command sends Telegram if configured + actionable signal)
+- Updated `.env.example` with Telegram setup instructions
+- Graceful degradation: no crash if Telegram not configured, just skips notification
+- Only sends notifications for BUY/SELL signals (not HOLD)
 
 ### Phase 8: Tests (`tests/`)
 Create: `tests/conftest.py`, `tests/test_data.py`, `tests/test_indicators.py`, `tests/test_strategies.py`, `tests/test_backtesting.py`, `tests/test_signals.py`
@@ -317,5 +328,5 @@ Full E2E verification
 | 4 | 4 | Backtesting engine (VectorBT) | DONE |
 | 5 | 5 | Signal generator | DONE |
 | 6 | 6 | Hybrid ML model (TF 2.20) | DONE |
-| 7 | 7 | Telegram bot | NEXT |
-| 8 | 8 + 9 | Tests + final integration | - |
+| 7 | 7 | Telegram bot | DONE |
+| 8 | 8 + 9 | Tests + final integration | NEXT |

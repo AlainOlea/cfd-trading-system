@@ -205,9 +205,11 @@ def signal(strategy, ticker, interval, use_ml):
 
         from signals.generator import SignalGenerator
         from signals.manager import SignalManager
+        from signals.telegram_bot import TelegramNotifier
 
         generator = SignalGenerator()
         manager = SignalManager()
+        notifier = TelegramNotifier()
 
         # Generate signal
         signal = generator.generate(
@@ -220,6 +222,12 @@ def signal(strategy, ticker, interval, use_ml):
         # Log and display
         manager.log_signal(signal)
         click.echo(manager.format_signal(signal))
+
+        # Send Telegram notification (if configured and signal is actionable)
+        if signal.direction != 'HOLD' and notifier.is_configured:
+            sent = notifier.send_signal(signal)
+            if sent:
+                click.echo("   Telegram notification sent")
 
         # Show recent history
         history = manager.get_history(ticker=ticker, n=5)
