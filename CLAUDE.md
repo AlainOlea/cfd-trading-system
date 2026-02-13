@@ -26,9 +26,9 @@ main.py                     # CLI entry point (Click) - 7 comandos
 data/fetcher.py             # [DONE] DataFetcher: yfinance + CCXT/Bitso
 data/processor.py           # [DONE] DataProcessor: limpieza y validacion
 indicators/technical.py     # [DONE] TechnicalIndicators: 12 indicadores via pandas-ta
-strategies/base.py          # [PENDING] BaseStrategy: clase abstracta
-strategies/scalping/        # [PENDING] MACDVWAPStrategy, RSIBBStrategy
-strategies/swing/           # [PENDING] MACrossoverStrategy
+strategies/base.py          # [DONE] BaseStrategy: clase abstracta + position sizing
+strategies/scalping/        # [DONE] MACDVWAPStrategy, RSIBBStrategy
+strategies/swing/           # [DONE] MACrossoverStrategy
 backtesting/engine.py       # [PENDING] BacktestEngine: wrapper backtesting.py
 backtesting/metrics.py      # [PENDING] PerformanceMetrics: sharpe, drawdown, win_rate
 backtesting/report.py       # [PENDING] BacktestReport: HTML + plotly
@@ -69,6 +69,14 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - `add_obv(df)` -> obv
 - Total: 26 columnas (5 OHLCV + 21 indicadores). Todos usan params de config/settings.py
 - Tested: SPY 1d 251 rows -> all indicators computed correctly
+
+### strategies/ - Trading Strategies
+- `strategies/base.py` - BaseStrategy ABC: generate_signals(), calculate_position_size(), _init_signal_columns()
+- `strategies/scalping/macd_vwap.py` - MACDVWAPStrategy: MACD cross + VWAP filter. SL 0.5%, TP 1%
+- `strategies/scalping/rsi_bb.py` - RSIBBStrategy: RSI oversold/overbought + BB touch. SL 0.7%, TP=bb_middle
+- `strategies/swing/ma_crossover.py` - MACrossoverStrategy: SMA50/200 golden/death cross. SL 2%, TP 3%
+- `strategies/__init__.py` - STRATEGY_MAP = {'macd_vwap': ..., 'rsi_bb': ..., 'ma_crossover': ...}
+- Signal columns added: signal (BUY/SELL/HOLD), entry_price, stop_loss, take_profit, confidence (0-1)
 
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
@@ -187,7 +195,8 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - **DONE Phase 0**: requirements.txt updated (tensorflow, python-telegram-bot), config/settings.py updated (ML_CONFIG, TRANSFORMER_CONFIG)
 - **DONE Phase 1**: data/fetcher.py, data/processor.py, data/__init__.py, main.py fetch-data command connected and tested
 - **DONE Phase 2**: indicators/technical.py with 12 indicators (26 columns total). Migrated venv to Python 3.12
-- **NEXT Phase 3**: Trading strategies
+- **DONE Phase 3**: 3 strategies implemented (MACD+VWAP: 21 signals, RSI+BB: 7 signals on SPY 1y). STRATEGY_MAP dict
+- **NEXT Phase 4**: Backtesting engine
 
 ### Phase 0: Dependencies Update - DONE
 - `requirements.txt`: tensorflow-lite -> tensorflow>=2.15.0, added python-telegram-bot>=20.0
@@ -204,12 +213,12 @@ tests/                      # [PENDING] pytest con fixtures en conftest.py
 - Modified `indicators/__init__.py`
 - Verified: SPY 1d 251 rows -> 26 columns (5 OHLCV + 21 indicators), all values reasonable
 
-### Phase 3: Trading Strategies (`strategies/`) - NEXT
+### Phase 3: Trading Strategies (`strategies/`) - DONE
 Create: `strategies/base.py`, `strategies/scalping/macd_vwap.py`, `strategies/scalping/rsi_bb.py`, `strategies/swing/ma_crossover.py`
 Modify: `strategies/__init__.py` (STRATEGY_MAP), `strategies/scalping/__init__.py`, `strategies/swing/__init__.py`
 Depends: Phase 2
 
-### Phase 4: Backtesting Engine (`backtesting/`)
+### Phase 4: Backtesting Engine (`backtesting/`) - NEXT
 Create: `backtesting/engine.py`, `backtesting/metrics.py`, `backtesting/report.py`
 Modify: `backtesting/__init__.py`, `main.py` (backtest command)
 Depends: Phase 3 + Phase 1
@@ -243,8 +252,8 @@ Full E2E verification
 |---------|--------|-------------|--------|
 | 1 | 0 + 1 | Setup + Data fetching | DONE |
 | 2 | 2 | Technical indicators | DONE |
-| 3 | 3 | Trading strategies | NEXT |
-| 4 | 4 | Backtesting engine | - |
+| 3 | 3 | Trading strategies | DONE |
+| 4 | 4 | Backtesting engine | NEXT |
 | 5 | 5 | Signal generator | - |
 | 6 | 6 | Hybrid ML model | - |
 | 7 | 7 | Telegram bot | - |
