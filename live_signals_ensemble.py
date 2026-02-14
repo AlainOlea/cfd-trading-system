@@ -38,10 +38,27 @@ from signals.telegram_bot import TelegramNotifier
 
 
 # Ensemble configuration - prioritize best performers
+# Format: (ticker, strategies, confidence_threshold)
 ENSEMBLE_TICKERS = [
+    # Tier 1: Best performers with 1d + 1h ensemble
     ('GLD', ['macd_vwap', 'rsi_bb'], 0.75),       # Gold: 64% LSTM accuracy ⭐
     ('MSFT', ['macd_vwap', 'rsi_bb'], 0.75),      # Microsoft: 60% LSTM accuracy ⭐
     ('QQQ', ['ma_crossover', 'macd_vwap'], 0.70), # Nasdaq: 56% LSTM accuracy
+
+    # Tier 2: Stocks with new 1h models (being trained)
+    ('AAPL', ['rsi_bb', 'macd_vwap'], 0.70),      # Apple: New 1h ensemble
+    ('NVDA', ['macd_vwap', 'rsi_bb'], 0.70),      # NVIDIA: New 1h ensemble
+    ('SPY', ['ma_crossover', 'macd_vwap'], 0.70), # S&P 500: New 1h ensemble
+
+    # Tier 3: Commodities with new 1h models (being trained)
+    ('GDX', ['rsi_bb', 'macd_vwap'], 0.70),       # Gold miners: New 1h ensemble
+    ('XLU', ['ma_crossover', 'rsi_bb'], 0.70),    # Utilities: New 1h ensemble
+    ('IWM', ['macd_vwap', 'rsi_bb'], 0.70),       # Small cap: New 1h ensemble
+
+    # Tier 4: Crypto with 1h models
+    ('BTC-USD', ['macd_vwap', 'rsi_bb'], 0.70),   # Bitcoin: 1h ensemble
+    ('ETH-USD', ['rsi_bb', 'macd_vwap'], 0.70),   # Ethereum: 1h ensemble
+    ('SOL-USD', ['macd_vwap', 'rsi_bb'], 0.70),   # Solana: 1h ensemble
 ]
 
 # Periods for multi-frequency analysis
