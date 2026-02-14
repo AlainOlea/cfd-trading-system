@@ -18,6 +18,11 @@ import logging
 from pathlib import Path
 from datetime import datetime
 import sys
+import os
+
+# Configure GPU for RTX 5060 compatibility (before TensorFlow import)
+from config.gpu_config import configure_gpu
+configure_gpu()
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))

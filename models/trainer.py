@@ -41,6 +41,17 @@ class ModelTrainer:
         self.early_stopping_patience = early_stopping_patience
         self.scaler = MinMaxScaler() if SCALER_TYPE == 'minmax' else StandardScaler()
 
+        # Configure GPU memory growth (prevents OOM errors)
+        try:
+            import tensorflow as tf
+            gpus = tf.config.list_physical_devices('GPU')
+            if gpus:
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                logger.info(f"✅ GPU memory growth enabled: {len(gpus)} GPU(s)")
+        except Exception as e:
+            logger.warning(f"GPU config warning: {e}")
+
     def prepare_data(
         self, df: pd.DataFrame,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:

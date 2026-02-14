@@ -1,0 +1,21 @@
+{
+  "features": [
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "rsi",
+    "macd",
+    "bb_upper",
+    "bb_lower"
+  ],
+  "lookback_window": 60,
+  "ticker": "BTC-USD",
+  "interval": "1h",
+  "lstm1_units": 50,
+  "lstm2_units": 50,
+  "d_model": 64,
+  "n_heads": 2,
+  "ff_dim": 128
+}

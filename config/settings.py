@@ -6,6 +6,10 @@ Central configuration file for all parameters.
 
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv(Path(__file__).parent.parent / '.env')
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -15,14 +19,38 @@ PROJECT_ROOT = Path(__file__).parent.parent
 # ============================================
 
 TICKERS = {
-    'indices': ['SPY', 'QQQ'],                    # S&P 500, Nasdaq
-    'commodities': ['GLD', 'USO'],                # Gold, Oil
-    'crypto': ['BTC-USD', 'ETH-USD'],             # Bitcoin, Ethereum (Yahoo Finance)
-    'stocks': ['AAPL', 'MSFT', 'GOOGL', 'TSLA']  # Popular stocks
+    'indices': [
+        'SPY',      # S&P 500
+        'QQQ',      # Nasdaq 100
+        'IWM',      # Russell 2000
+        'VTI',      # Total US Market
+    ],
+    'commodities': [
+        'GLD',      # Gold
+        'USO',      # Crude Oil
+        'DBC',      # Commodities Index
+        'UNG',      # Natural Gas
+    ],
+    'crypto': [
+        'BTC-USD',  # Bitcoin
+        'ETH-USD',  # Ethereum
+        'SOL-USD',  # Solana
+        'ADA-USD',  # Cardano
+    ],
+    'stocks': [
+        'AAPL',     # Apple
+        'MSFT',     # Microsoft
+        'GOOGL',    # Google
+        'TSLA',     # Tesla
+        'NVDA',     # NVIDIA
+        'AMZN',     # Amazon
+        'META',     # Meta/Facebook
+        'NFLX',     # Netflix
+    ]
 }
 
-# Default tickers for testing
-DEFAULT_TICKERS = ['SPY', 'GLD', 'BTC-USD']
+# Default tickers for testing (expanded)
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'GLD', 'BTC-USD', 'ETH-USD', 'AAPL', 'NVDA']
 
 # ============================================
 # TIMEFRAMES & DATES
@@ -257,7 +285,7 @@ SMTP_SERVER = 'smtp.gmail.com'
 SMTP_PORT = 587
 
 # Telegram alerts
-TELEGRAM_ALERTS_ENABLED = False
+TELEGRAM_ALERTS_ENABLED = True
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 
