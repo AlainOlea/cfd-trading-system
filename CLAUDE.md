@@ -1,5 +1,39 @@
 # CFD Trading System
 
+## ⚡ IMPORTANT: Initial Session Setup
+
+**REQUIRED ON SESSION START:**
+
+When beginning a new session with Claude, you MUST read the following documentation as context:
+
+1. **FIRST** - Read this file (CLAUDE.md) - Project specifications
+2. **THEN** - Read documentation in order:
+   - `docs/README.md` - Documentation index and quick navigation
+   - `docs/guides/INTEGRATION_SUMMARY.md` - System architecture and features
+   - `docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md` - Sentiment analysis improvements
+   - `docs/guides/NEWS_ANALYZER_SETUP.md` - News sentiment integration
+
+**Quick Command to Load All Context:**
+```bash
+cat CLAUDE.md docs/README.md docs/guides/INTEGRATION_SUMMARY.md docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md
+```
+
+**Why?** The documentation contains:
+- ✅ Current system state and capabilities
+- ✅ Sentiment analysis improvements (V2 prompt)
+- ✅ News sentiment integration details
+- ✅ 41 pre-configured scripts and workflows
+- ✅ Central script manager usage
+- ✅ All recent improvements and architecture
+
+**Failure to read docs will result in:**
+- ❌ Incomplete understanding of project state
+- ❌ Inability to suggest improvements
+- ❌ Missing context on recent changes
+- ❌ Inefficient task execution
+
+---
+
 ## Project Overview
 Sistema hibrido de trading tecnico para CFDs. Genera senales automaticas (analisis tecnico + ML) con ejecucion manual en Plus500 y senales para crypto. Python 3.10+.
 
@@ -340,3 +374,116 @@ Depends: Phase 2
 | 6 | 6 | Hybrid ML model (TF 2.20) | DONE |
 | 7 | 7 | Telegram bot | DONE |
 | 8 | 8 + 9 | Tests + final integration | DONE |
+
+---
+
+## 🔴 CRITICAL: Documentation Reading Requirement
+
+**This section is MANDATORY for every new Claude session:**
+
+### What You MUST Do at Session Start:
+
+1. **Read CLAUDE.md** (this file) - You're reading it now ✓
+
+2. **Read docs/README.md** - Overview and navigation guide
+   ```bash
+   cat docs/README.md
+   ```
+
+3. **Read docs/guides/INTEGRATION_SUMMARY.md** - Full system architecture
+   ```bash
+   cat docs/guides/INTEGRATION_SUMMARY.md
+   ```
+
+4. **Read docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md** - Sentiment analysis improvements
+   ```bash
+   cat docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md
+   ```
+
+5. **Read docs/guides/NEWS_ANALYZER_SETUP.md** - News sentiment integration
+   ```bash
+   cat docs/guides/NEWS_ANALYZER_SETUP.md
+   ```
+
+### Why This Is Critical:
+
+- ✅ You need to understand **current system state**
+- ✅ You need to know about **recent improvements** (sentiment analysis V2, script manager)
+- ✅ You need context on **41 pre-configured scripts** and **5 workflows**
+- ✅ You need to know about **news sentiment integration**
+- ✅ You need to understand **central script manager** (run_script.py)
+- ✅ You need to avoid **suggesting already-implemented features**
+- ✅ You need to provide **context-aware suggestions**
+
+### What Happens If You Don't Read Docs:
+
+❌ You won't know about sentiment analysis improvements (V2 prompt with +15-20% accuracy)
+❌ You won't know about the centralized script manager (41 scripts, 8 categories)
+❌ You won't understand the new project structure (/docs organization)
+❌ You'll suggest features that already exist
+❌ You'll miss important context about news sentiment integration
+❌ Your suggestions will be less valuable
+
+### Verification Checklist:
+
+Before helping the user, confirm you have read:
+- [x] CLAUDE.md (this file)
+- [ ] docs/README.md
+- [ ] docs/guides/INTEGRATION_SUMMARY.md
+- [ ] docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md
+- [ ] docs/guides/NEWS_ANALYZER_SETUP.md
+
+**Do not proceed with tasks until ALL items are checked.**
+
+---
+
+## Documentation Quick Reference
+
+| Document | Location | Purpose |
+|----------|----------|---------|
+| **Project Overview** | CLAUDE.md | Specifications, architecture, design decisions |
+| **Documentation Index** | docs/README.md | Navigation guide, quick start by role |
+| **System Architecture** | docs/guides/INTEGRATION_SUMMARY.md | Full integration, features, examples |
+| **Sentiment Analysis** | docs/prompts/PROMPT_IMPROVEMENTS_SUMMARY.md | Before/after comparison, improvements |
+| **News Setup** | docs/guides/NEWS_ANALYZER_SETUP.md | API keys, setup, troubleshooting |
+| **Prompt Analysis** | docs/prompts/PROMPT_OPTIMIZATION.md | Prompt engineering, 3 versions |
+
+## Key Information to Know:
+
+### Recent Improvements (Latest Session)
+- ✅ Sentiment analysis V2: +15-20% accuracy improvement
+- ✅ Centralized script manager: 41 scripts in 8 categories
+- ✅ Project reorganization: /docs with guides/, prompts/, analysis/, tests/
+- ✅ News sentiment integration: Google Gemini AI + NewsAPI
+- ✅ Professional documentation structure
+
+### Available Scripts (Quick Access)
+```bash
+python3 run_script.py list              # Show all categories
+python3 run_script.py list signals      # Show signals scripts
+python3 run_script.py data fetch-all    # Fetch all data
+python3 run_script.py signals ensemble-expanded  # Generate signals
+python3 run_script.py news test-gld     # Test news sentiment
+python3 run_script.py test test-all     # Run all tests
+```
+
+### Script Categories
+- **data** - Data fetching (4 scripts)
+- **train** - ML model training (6 scripts)
+- **signals** - Signal generation (7 scripts)
+- **backtest** - Strategy backtesting (4 scripts)
+- **news** - News sentiment testing (5 scripts)
+- **test** - Unit tests (7 scripts)
+- **docs** - Documentation access (3 scripts)
+- **workflows** - Multi-step workflows (5 scripts)
+
+---
+
+## Agent Accountability
+
+If an agent fails to read the documentation and misses important context, it is:
+- ❌ Not following instructions
+- ❌ Providing suboptimal suggestions
+- ❌ Wasting the user's time
+
+**Every new session MUST start with reading the /docs folder to maintain context continuity.**
