@@ -38,6 +38,7 @@ from data.processor import DataProcessor
 from indicators.technical import TechnicalIndicators
 from models.ensemble_predictor import EnsemblePredictor
 from signals.telegram_bot import TelegramNotifier
+from signals.news_analyzer import NewsAnalyzer
 import csv
 
 
@@ -144,6 +145,7 @@ def main(args):
     print(f"{'='*80}\n")
 
     notifier = TelegramNotifier()
+    news_analyzer = NewsAnalyzer()
     all_signals = []
     actionable_by_sector = defaultdict(list)
 
@@ -208,7 +210,7 @@ def main(args):
                         })
                         break
 
-                # Send Telegram notification
+                # Send Telegram notification with news context
                 if notifier.is_configured:
                     msg = (
                         f"🎯 *Ensemble Signal*\n"
@@ -218,6 +220,21 @@ def main(args):
                         f"Timeframe: {period}\n"
                         f"Source: LSTM + XGBoost"
                     )
+
+                    # Fetch and append news context
+                    signal_dict = {
+                        'direction': direction,
+                        'confidence': confidence
+                    }
+                    try:
+                        news_context = news_analyzer.get_signal_context(ticker, signal_dict)
+                        if news_context:
+                            news_msg = news_analyzer.format_for_telegram(news_context)
+                            if news_msg:
+                                msg += news_msg
+                    except Exception as e:
+                        logger.debug(f"Could not fetch news for {ticker}: {e}")
+
                     notifier.send_alert(msg)
 
     # Summary by sector
