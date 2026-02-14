@@ -120,6 +120,8 @@ class ModelTrainer:
         model: HybridLSTMTransformer,
         X_train: np.ndarray,
         y_train: np.ndarray,
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
         epochs: int | None = None,
         batch_size: int | None = None,
     ) -> dict:
@@ -129,6 +131,8 @@ class ModelTrainer:
             model: HybridLSTMTransformer instance (must have .model built).
             X_train: Training features.
             y_train: Training labels.
+            X_val: Optional explicit validation features (chronological).
+            y_val: Optional explicit validation labels (chronological).
             epochs: Override default epochs.
             batch_size: Override default batch size.
 
@@ -158,11 +162,27 @@ class ModelTrainer:
 
         logger.info(f"Training started: {epochs} epochs, batch_size={batch_size}")
 
+        # Use explicit validation set if provided, otherwise split chronologically
+        if X_val is not None and y_val is not None:
+            validation_data = (X_val, y_val)
+            val_split = 0.0
+        else:
+            # Chronological split from training data (not from shuffled)
+            val_size = int(len(X_train) * self.validation_split)
+            X_train_sub = X_train[:-val_size]
+            y_train_sub = y_train[:-val_size]
+            X_val = X_train[-val_size:]
+            y_val = y_train[-val_size:]
+            validation_data = (X_val, y_val)
+            val_split = 0.0
+            X_train = X_train_sub
+            y_train = y_train_sub
+
         history = model.model.fit(
             X_train, y_train,
             epochs=epochs,
             batch_size=batch_size,
-            validation_split=self.validation_split,
+            validation_data=validation_data,
             callbacks=callbacks,
             verbose=1,
         )
@@ -175,6 +195,268 @@ class ModelTrainer:
             f"val_acc={history.history['val_accuracy'][-1]:.4f}"
         )
         return history.history
+
+    def prepare_data_walk_forward(
+        self,
+        df: pd.DataFrame,
+        train_window: int = 200,
+        test_window: int = 20,
+        step_size: int = 20,
+        method: str = 'anchored',
+    ) -> list[dict]:
+        """Create walk-forward validation splits for robust testing.
+
+        Creates multiple chronological train/test folds to simulate real-world
+        rolling deployment and assess model degradation over time.
+
+        Args:
+            df: DataFrame with OHLCV + indicator columns.
+            train_window: Number of bars (sliding windows) for training.
+            test_window: Number of bars (sliding windows) for testing.
+            step_size: How many bars to roll forward per fold.
+            method: 'anchored' (expanding), 'rolling' (fixed-size), or 'expanding'.
+
+        Returns:
+            List of dicts with keys:
+                - fold: Fold index
+                - X_train, y_train: Training data
+                - X_test, y_test: Test data
+                - train_dates: (start_date, end_date) tuple
+                - test_dates: (start_date, end_date) tuple
+        """
+        # First prepare the full dataset
+        available = [f for f in self.features if f in df.columns]
+        if len(available) < len(self.features):
+            missing = set(self.features) - set(available)
+            logger.warning(f"Missing features: {missing}")
+        if not available:
+            raise ValueError(f"No features found. Available: {df.columns.tolist()}")
+
+        data = df[available].copy()
+        data = data.dropna()
+
+        # Create labels
+        close_col = 'close' if 'close' in available else available[0]
+        close_values = data[close_col].values
+        labels = (close_values[1:] > close_values[:-1]).astype(np.float32)
+        data = data.iloc[:-1]
+
+        # Normalize features (fit on full dataset for consistency)
+        values = data.values.astype(np.float32)
+        if NORMALIZE_FEATURES:
+            values = self.scaler.fit_transform(values)
+
+        # Create all sliding windows
+        X_all, y_all = [], []
+        for i in range(len(values) - self.lookback_window):
+            X_all.append(values[i:i + self.lookback_window])
+            y_all.append(labels[i + self.lookback_window])
+
+        X_all = np.array(X_all)
+        y_all = np.array(y_all)
+
+        logger.info(f"Total windows created: {len(X_all)}")
+        logger.info(f"Using walk-forward method: {method}")
+
+        # Create folds
+        folds = []
+        fold_idx = 0
+
+        if method == 'anchored':
+            # Expanding window: train grows, test moves forward
+            pos = 0
+            while pos + train_window + test_window <= len(X_all):
+                train_end = pos + train_window
+                test_end = train_end + test_window
+
+                X_tr = X_all[:train_end]
+                y_tr = y_all[:train_end]
+                X_te = X_all[train_end:test_end]
+                y_te = y_all[train_end:test_end]
+
+                # Map back to dates
+                train_date_start = data.index[0]
+                train_date_end = data.index[train_end]
+                test_date_start = data.index[train_end]
+                test_date_end = data.index[min(test_end, len(data) - 1)]
+
+                folds.append({
+                    'fold': fold_idx,
+                    'X_train': X_tr,
+                    'y_train': y_tr,
+                    'X_test': X_te,
+                    'y_test': y_te,
+                    'train_dates': (train_date_start, train_date_end),
+                    'test_dates': (test_date_start, test_date_end),
+                })
+
+                pos += step_size
+                fold_idx += 1
+
+        elif method == 'rolling':
+            # Rolling window: train size fixed, both roll forward
+            pos = 0
+            while pos + train_window + test_window <= len(X_all):
+                train_start = pos
+                train_end = pos + train_window
+                test_end = train_end + test_window
+
+                X_tr = X_all[train_start:train_end]
+                y_tr = y_all[train_start:train_end]
+                X_te = X_all[train_end:test_end]
+                y_te = y_all[train_end:test_end]
+
+                train_date_start = data.index[train_start]
+                train_date_end = data.index[train_end - 1]
+                test_date_start = data.index[train_end]
+                test_date_end = data.index[min(test_end - 1, len(data) - 1)]
+
+                folds.append({
+                    'fold': fold_idx,
+                    'X_train': X_tr,
+                    'y_train': y_tr,
+                    'X_test': X_te,
+                    'y_test': y_te,
+                    'train_dates': (train_date_start, train_date_end),
+                    'test_dates': (test_date_start, test_date_end),
+                })
+
+                pos += step_size
+                fold_idx += 1
+
+        else:
+            raise ValueError(f"Unknown method: {method}. Use 'anchored' or 'rolling'")
+
+        logger.info(f"Created {len(folds)} walk-forward folds")
+        return folds
+
+    def train_walk_forward(
+        self,
+        model_builder: callable,
+        df: pd.DataFrame,
+        train_window: int = 200,
+        test_window: int = 20,
+        step_size: int = 20,
+        method: str = 'anchored',
+        retrain_every_fold: bool = True,
+    ) -> dict:
+        """Train model using walk-forward validation.
+
+        Tests model on multiple time periods to assess generalization and
+        detect performance degradation over time.
+
+        Args:
+            model_builder: Callable that returns fresh HybridLSTMTransformer instances.
+            df: Full historical DataFrame.
+            train_window: Bars for training.
+            test_window: Bars for testing.
+            step_size: Bars to roll forward.
+            method: 'anchored' or 'rolling'.
+            retrain_every_fold: If True, build fresh model per fold.
+
+        Returns:
+            Dict with aggregate metrics:
+                - folds: List of per-fold results
+                - mean_accuracy, std_accuracy
+                - mean_precision, mean_recall
+                - best_fold, worst_fold
+                - fold_accuracies: List of test accuracies
+        """
+        # Create folds
+        folds = self.prepare_data_walk_forward(
+            df,
+            train_window=train_window,
+            test_window=test_window,
+            step_size=step_size,
+            method=method,
+        )
+
+        if not folds:
+            raise ValueError("No folds created. Check data size and window parameters.")
+
+        fold_results = []
+        accuracies = []
+        precisions = []
+        recalls = []
+
+        print(f"\n{'='*70}")
+        print(f"🔄 WALK-FORWARD VALIDATION - {len(folds)} folds")
+        print(f"{'='*70}\n")
+
+        for fold in folds:
+            fold_num = fold['fold']
+            print(f"Fold {fold_num + 1}/{len(folds)}: ", end="", flush=True)
+
+            # Build fresh model or reuse
+            if retrain_every_fold or not fold_results:
+                model = model_builder()
+            else:
+                model = model_builder()
+
+            # Train
+            try:
+                history = self.train(
+                    model,
+                    fold['X_train'], fold['y_train'],
+                    X_val=fold['X_test'], y_val=fold['y_test'],
+                    epochs=self.epochs,
+                    batch_size=self.batch_size,
+                )
+            except Exception as e:
+                logger.error(f"Training failed on fold {fold_num}: {e}")
+                print(f"❌ ERROR: {e}")
+                continue
+
+            # Evaluate
+            metrics = self.evaluate(model, fold['X_test'], fold['y_test'])
+            fold_results.append({
+                'fold': fold_num,
+                'metrics': metrics,
+                'train_dates': fold['train_dates'],
+                'test_dates': fold['test_dates'],
+            })
+
+            accuracies.append(metrics['accuracy'])
+            precisions.append(metrics['precision'])
+            recalls.append(metrics['recall'])
+
+            print(
+                f"✅ acc={metrics['accuracy']:.2%}, "
+                f"prec={metrics['precision']:.2%}, "
+                f"recall={metrics['recall']:.2%}"
+            )
+
+        # Aggregate results
+        print(f"\n{'='*70}")
+        print(f"📊 AGGREGATE RESULTS")
+        print(f"{'='*70}\n")
+
+        mean_acc = np.mean(accuracies) if accuracies else 0.0
+        std_acc = np.std(accuracies) if accuracies else 0.0
+        mean_prec = np.mean(precisions) if precisions else 0.0
+        mean_recall = np.mean(recalls) if recalls else 0.0
+
+        best_fold_idx = np.argmax(accuracies) if accuracies else -1
+        worst_fold_idx = np.argmin(accuracies) if accuracies else -1
+
+        print(f"Mean Accuracy:   {mean_acc:.4f} ± {std_acc:.4f}")
+        print(f"Mean Precision:  {mean_prec:.4f}")
+        print(f"Mean Recall:     {mean_recall:.4f}")
+        print(f"Best Fold:       {best_fold_idx} (acc={accuracies[best_fold_idx]:.4f})")
+        print(f"Worst Fold:      {worst_fold_idx} (acc={accuracies[worst_fold_idx]:.4f})")
+        print(f"\n{'='*70}\n")
+
+        return {
+            'folds': fold_results,
+            'mean_accuracy': float(mean_acc),
+            'std_accuracy': float(std_acc),
+            'mean_precision': float(mean_prec),
+            'mean_recall': float(mean_recall),
+            'fold_accuracies': accuracies,
+            'best_fold': int(best_fold_idx),
+            'worst_fold': int(worst_fold_idx),
+            'num_folds': len(fold_results),
+        }
 
     def evaluate(
         self,

@@ -10,7 +10,7 @@ import logging
 
 import tensorflow as tf
 from tensorflow import keras
-from keras import layers
+from keras import layers, regularizers
 
 from config.settings import LSTM_LAYERS, ML_CONFIG, TRANSFORMER_CONFIG
 
@@ -64,6 +64,8 @@ class HybridLSTMTransformer:
         lstm1_units: int = LSTM_LAYERS['lstm1_units'],
         lstm2_units: int = LSTM_LAYERS['lstm2_units'],
         dropout_rate: float = LSTM_LAYERS['dropout_rate'],
+        l2_reg: float = LSTM_LAYERS.get('l2_regularization', 0.01),
+        use_batch_norm: bool = LSTM_LAYERS.get('use_batch_norm', True),
         n_heads: int = TRANSFORMER_CONFIG['n_heads'],
         d_model: int = TRANSFORMER_CONFIG['d_model'],
         ff_dim: int = TRANSFORMER_CONFIG['ff_dim'],
@@ -74,6 +76,8 @@ class HybridLSTMTransformer:
         self.lstm1_units = lstm1_units
         self.lstm2_units = lstm2_units
         self.dropout_rate = dropout_rate
+        self.l2_reg = l2_reg
+        self.use_batch_norm = use_batch_norm
         self.n_heads = n_heads
         self.d_model = d_model
         self.ff_dim = ff_dim
@@ -83,7 +87,7 @@ class HybridLSTMTransformer:
         self.model: keras.Model | None = None
 
     def build(self, input_shape: tuple[int, int]) -> keras.Model:
-        """Build the hybrid LSTM+Transformer model.
+        """Build the hybrid LSTM+Transformer model with regularization.
 
         Args:
             input_shape: (lookback_window, n_features).
@@ -93,20 +97,39 @@ class HybridLSTMTransformer:
         """
         inputs = layers.Input(shape=input_shape)
 
-        # LSTM branch: captures sequential patterns
+        # LSTM branch: captures sequential patterns (with L2 regularization)
         x = layers.LSTM(
             self.lstm1_units, return_sequences=True,
+            kernel_regularizer=regularizers.l2(self.l2_reg),
+            recurrent_regularizer=regularizers.l2(self.l2_reg),
             name='lstm_1',
         )(inputs)
-        x = layers.Dropout(self.dropout_rate)(x)
-        x = layers.LSTM(
-            self.lstm2_units, return_sequences=True,
-            name='lstm_2',
-        )(x)
+
+        # Optional batch normalization after LSTM
+        if self.use_batch_norm:
+            x = layers.BatchNormalization()(x)
+
         x = layers.Dropout(self.dropout_rate)(x)
 
-        # Project LSTM output to d_model dimension for Transformer
-        x = layers.Dense(self.d_model, name='projection')(x)
+        x = layers.LSTM(
+            self.lstm2_units, return_sequences=True,
+            kernel_regularizer=regularizers.l2(self.l2_reg),
+            recurrent_regularizer=regularizers.l2(self.l2_reg),
+            name='lstm_2',
+        )(x)
+
+        # Optional batch normalization after LSTM
+        if self.use_batch_norm:
+            x = layers.BatchNormalization()(x)
+
+        x = layers.Dropout(self.dropout_rate)(x)
+
+        # Project LSTM output to d_model dimension for Transformer (with L2 reg)
+        x = layers.Dense(
+            self.d_model,
+            kernel_regularizer=regularizers.l2(self.l2_reg),
+            name='projection'
+        )(x)
 
         # Transformer encoder: captures long-range dependencies
         x = TransformerEncoderBlock(
@@ -120,9 +143,19 @@ class HybridLSTMTransformer:
         # Global average pooling over the sequence dimension
         x = layers.GlobalAveragePooling1D()(x)
 
-        # Dense classification head
-        x = layers.Dense(self.dense_units, activation='relu', name='dense_head')(x)
+        # Dense classification head (with L2 regularization and batch norm)
+        x = layers.Dense(
+            self.dense_units, activation='relu',
+            kernel_regularizer=regularizers.l2(self.l2_reg),
+            name='dense_head'
+        )(x)
+
+        if self.use_batch_norm:
+            x = layers.BatchNormalization()(x)
+
         x = layers.Dropout(self.dropout_rate)(x)
+
+        # Output layer
         outputs = layers.Dense(1, activation='sigmoid', name='output')(x)
 
         self.model = keras.Model(inputs=inputs, outputs=outputs, name='hybrid_lstm_transformer')
@@ -133,7 +166,10 @@ class HybridLSTMTransformer:
             metrics=['accuracy'],
         )
 
-        logger.info(f"Model built: input_shape={input_shape}, params={self.model.count_params():,}")
+        logger.info(
+            f"Model built: input_shape={input_shape}, params={self.model.count_params():,}, "
+            f"dropout={self.dropout_rate}, l2_reg={self.l2_reg}, batch_norm={self.use_batch_norm}"
+        )
         return self.model
 
     def summary(self) -> str:

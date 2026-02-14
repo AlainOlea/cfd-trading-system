@@ -136,14 +136,26 @@ ML_CONFIG = {
     'validation_split': 0.15,
     'test_split': 0.15,
     'early_stopping_patience': 10,
-    'learning_rate': 0.001
+    'learning_rate': 0.001,
+    # Walk-forward validation parameters
+    'walk_forward': {
+        'enabled': False,            # Enable walk-forward validation
+        'train_window': 200,         # Bars for training in each fold
+        'test_window': 20,           # Bars for testing in each fold
+        'step_size': 20,             # How much to roll forward per fold
+        'method': 'anchored',        # 'anchored' (expanding) or 'rolling' (fixed)
+        'retrain_every_fold': True,  # Build fresh model per fold
+        'min_folds': 3,              # Minimum folds required
+    }
 }
 
-# LSTM Layers
+# LSTM Layers with Regularization
 LSTM_LAYERS = {
     'lstm1_units': 50,
     'lstm2_units': 50,
-    'dropout_rate': 0.2
+    'dropout_rate': 0.3,             # Increased from 0.2 for better regularization
+    'l2_regularization': 0.01,       # L2 regularization strength
+    'use_batch_norm': True,          # Use batch normalization after LSTM
 }
 
 # Transformer Encoder
