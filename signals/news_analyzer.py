@@ -118,26 +118,92 @@ class NewsAnalyzer:
             # Format articles for analysis
             articles_text = "\n\n".join(
                 [
+                    f"Article {i+1}:\n"
                     f"Title: {a['title']}\n"
                     f"Source: {a['source']}\n"
                     f"Published: {a['published_at']}\n"
                     f"Summary: {a['description']}"
-                    for a in articles[:5]
+                    for i, a in enumerate(articles[:5])
                 ]
             )
 
-            prompt = f"""Analyze the sentiment of these news articles about {ticker} in the context of a {signal['direction']} trading signal with {signal['confidence']:.2%} confidence.
+            prompt = f"""You are a professional trading sentiment analyst specializing in market-moving news.
 
-News Articles:
+===== SIGNAL CONTEXT =====
+Ticker: {ticker}
+Signal Direction: {signal['direction']}
+Model Confidence: {signal['confidence']:.1%}
+Analysis Date: {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}
+
+===== NEWS ARTICLES TO ANALYZE =====
 {articles_text}
 
-Provide a brief analysis (2-3 sentences max) addressing:
-1. Overall sentiment (bullish/bearish/neutral)
-2. Key risk factors mentioned
-3. Alignment with trading signal (strongly aligns/aligns/neutral/conflicts/strongly conflicts)
-4. Confidence adjustment (decrease/maintain/increase)
+===== ANALYSIS FRAMEWORK =====
 
-Format as JSON with keys: sentiment, risks, alignment, confidence_adjustment, summary"""
+Step 1: SENTIMENT EXTRACTION
+- Identify overall tone: bullish, bearish, or neutral
+- For mixed sentiments, specify the ratio (e.g., "70% bullish, 30% bearish")
+- Weight recent articles (today/yesterday) 2x more important than older articles
+- Score from 0.0 (most bearish) to 1.0 (most bullish)
+
+Step 2: CREDIBILITY ASSESSMENT
+- High credibility sources (Reuters, Bloomberg, AP, SEC filings, official announcements)
+- Medium credibility sources (Yahoo Finance, CNBC, major financial media)
+- Low credibility sources (social media, minor blogs, speculation)
+- Calculate weighted sentiment using source credibility
+
+Step 3: MARKET-MOVING FACTORS
+Focus only on factors that materially affect price:
+✅ Earnings surprises, guidance changes, management statements
+✅ Regulatory/legal changes affecting the company
+✅ Major partnerships, customer wins/losses
+✅ Product breakthroughs or failures
+✅ Significant debt, financing, or M&A news
+❌ General commentary, analyst opinions without new data
+❌ Speculation about the company
+
+Step 4: RISK IDENTIFICATION
+Extract risks SPECIFIC to {ticker}:
+- Company-specific risks (competitive position, cash flow, management)
+- Financial risks (debt, leverage, earnings quality)
+- Regulatory/legal risks
+- Market/macro risks affecting the sector
+- Assess severity: Critical > High > Medium > Low
+
+Step 5: SIGNAL ALIGNMENT
+Compare news sentiment to the {signal['direction']} signal:
+- STRONGLY ALIGNS: News strongly confirms {signal['direction']} direction
+- ALIGNS: News moderately supports {signal['direction']}
+- NEUTRAL: News doesn't clearly support or oppose the signal
+- CONFLICTS: News contradicts {signal['direction']} direction
+- STRONGLY CONFLICTS: News strongly opposes {signal['direction']}
+
+Step 6: CONFIDENCE ADJUSTMENT
+Should trader confidence increase, maintain, or decrease?
+- INCREASE (0.05-0.30): News strongly confirms signal direction
+  → Use higher adjustment (0.20-0.30) if: high-credibility sources, unanimous agreement, major catalysts
+  → Use lower adjustment (0.05-0.10) if: single source, minor news
+- MAINTAIN (0.00): News is neutral or mixed
+- DECREASE (0.05-0.30): News contradicts signal direction
+  → Use higher adjustment (0.20-0.30) if: high-credibility sources, contradictory catalysts
+  → Use lower adjustment (0.05-0.10) if: single source, minor contradictions
+
+===== RESPONSE FORMAT =====
+Return ONLY valid JSON with these fields:
+{{
+  "sentiment": "bullish|bearish|neutral|mixed",
+  "sentiment_score": 0.65,
+  "sentiment_breakdown": {{"bullish": 0.65, "neutral": 0.25, "bearish": 0.10}},
+  "credibility": "high|medium|low",
+  "key_risks": ["risk1", "risk2", "risk3"],
+  "alignment": "strongly_aligns|aligns|neutral|conflicts|strongly_conflicts",
+  "alignment_score": 0.68,
+  "confidence_adjustment": "decrease|maintain|increase",
+  "adjustment_strength": 0.12,
+  "reasoning": "Brief one-sentence explanation of the recommendation"
+}}
+
+Critical: Return ONLY the JSON object, no other text."""
 
             response = self.model.generate_content(prompt)
             analysis_text = response.text
@@ -149,18 +215,17 @@ Format as JSON with keys: sentiment, risks, alignment, confidence_adjustment, su
             # Extract JSON from response
             json_match = re.search(r"\{.*\}", analysis_text, re.DOTALL)
             if json_match:
-                analysis = json.loads(json_match.group())
-                analysis["raw_response"] = analysis_text
-                return analysis
+                try:
+                    analysis = json.loads(json_match.group())
+                    analysis["raw_response"] = analysis_text
+                    return analysis
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse JSON response: {analysis_text[:200]}")
+                    return None
             else:
-                # Fallback if JSON parsing fails
-                return {
-                    "sentiment": "neutral",
-                    "risks": "Unable to parse sentiment",
-                    "alignment": "neutral",
-                    "confidence_adjustment": "maintain",
-                    "summary": analysis_text[:200],
-                }
+                # Fallback if JSON not found
+                logger.warning(f"No JSON found in response: {analysis_text[:200]}")
+                return None
 
         except Exception as e:
             logger.warning(f"Error analyzing sentiment for {ticker}: {e}")
@@ -204,7 +269,7 @@ Format as JSON with keys: sentiment, risks, alignment, confidence_adjustment, su
         """Format news context for Telegram message.
 
         Args:
-            context: News context dict
+            context: News context dict with sentiment analysis
 
         Returns:
             Formatted string for Telegram
@@ -217,13 +282,62 @@ Format as JSON with keys: sentiment, risks, alignment, confidence_adjustment, su
 
         # Build message
         msg = f"\n📰 *News Analysis ({context['articles_count']} articles)*\n"
-        msg += f"Sentiment: *{sentiment.get('sentiment', 'N/A').upper()}*\n"
-        msg += f"Alignment: {sentiment.get('alignment', 'N/A')}\n"
 
-        if sentiment.get("risks"):
-            msg += f"⚠️  Risks: {sentiment['risks']}\n"
+        # Overall sentiment with score
+        sentiment_text = sentiment.get('sentiment', 'N/A').upper()
+        sentiment_score = sentiment.get('sentiment_score', 0)
+        if sentiment_score:
+            msg += f"Sentiment: *{sentiment_text}* ({sentiment_score:.0%})\n"
+        else:
+            msg += f"Sentiment: *{sentiment_text}*\n"
 
-        msg += f"Confidence Adjustment: {sentiment.get('confidence_adjustment', 'maintain').upper()}\n"
+        # Credibility assessment
+        credibility = sentiment.get('credibility', '')
+        if credibility:
+            credibility_emoji = {'high': '✅', 'medium': '⚠️', 'low': '❌'}.get(credibility, '⚠️')
+            msg += f"{credibility_emoji} Credibility: {credibility.capitalize()}\n"
+
+        # Alignment with signal
+        alignment = sentiment.get('alignment', 'N/A')
+        alignment_score = sentiment.get('alignment_score', 0)
+        alignment_emoji = {
+            'strongly_aligns': '🟢',
+            'aligns': '🟢',
+            'neutral': '⚪',
+            'conflicts': '🔴',
+            'strongly_conflicts': '🔴'
+        }.get(alignment, '⚪')
+
+        if alignment_score:
+            msg += f"{alignment_emoji} Alignment: {alignment} ({alignment_score:+.0%})\n"
+        else:
+            msg += f"{alignment_emoji} Alignment: {alignment}\n"
+
+        # Key risks
+        risks = sentiment.get("key_risks", [])
+        if risks and risks != ["Unable to parse sentiment"]:
+            risk_text = ", ".join(risks[:2])  # Top 2 risks
+            msg += f"⚠️  Key Risks: {risk_text}\n"
+
+        # Confidence adjustment with strength
+        adjustment = sentiment.get('confidence_adjustment', 'maintain').upper()
+        strength = sentiment.get('adjustment_strength', 0)
+
+        adjustment_emoji = {
+            'INCREASE': '📈',
+            'MAINTAIN': '➡️',
+            'DECREASE': '📉'
+        }.get(adjustment, '➡️')
+
+        if strength:
+            msg += f"{adjustment_emoji} Confidence: {adjustment} (+{strength:.0%})\n"
+        else:
+            msg += f"{adjustment_emoji} Confidence: {adjustment}\n"
+
+        # Reasoning
+        reasoning = sentiment.get('reasoning', '')
+        if reasoning and reasoning != 'Unable to parse sentiment':
+            msg += f"💡 Insight: {reasoning}\n"
 
         # Add top articles
         if articles:
