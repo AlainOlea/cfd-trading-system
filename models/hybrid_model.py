@@ -160,10 +160,17 @@ class HybridLSTMTransformer:
 
         self.model = keras.Model(inputs=inputs, outputs=outputs, name='hybrid_lstm_transformer')
 
+        # Use SGD with Momentum for better convergence (especially with lower learning rates)
+        # SGD+Momentum works better than Adam for this architecture in our case
         self.model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=self.learning_rate),
+            optimizer=keras.optimizers.SGD(
+                learning_rate=self.learning_rate,
+                momentum=0.9,
+                decay=1e-5,
+                nesterov=True
+            ),
             loss='binary_crossentropy',
-            metrics=['accuracy'],
+            metrics=['accuracy', 'precision', 'recall'],
         )
 
         logger.info(

@@ -474,18 +474,25 @@ class ModelTrainer:
         Returns:
             Dict with loss, accuracy, precision, recall.
         """
-        loss, accuracy = model.model.evaluate(X_test, y_test, verbose=0)
+        # Model now returns [loss, accuracy, precision, recall] because of compiled metrics
+        eval_results = model.model.evaluate(X_test, y_test, verbose=0)
 
-        # Calculate precision and recall
-        y_pred = (model.model.predict(X_test, verbose=0) > 0.5).astype(int).flatten()
-        y_true = y_test.astype(int)
+        # Unpack all metrics (loss, accuracy, precision, recall)
+        if len(eval_results) == 4:
+            loss, accuracy, precision, recall = eval_results
+        else:
+            # Fallback for older models (loss, accuracy only)
+            loss, accuracy = eval_results
+            # Calculate precision and recall manually
+            y_pred = (model.model.predict(X_test, verbose=0) > 0.5).astype(int).flatten()
+            y_true = y_test.astype(int)
 
-        tp = np.sum((y_pred == 1) & (y_true == 1))
-        fp = np.sum((y_pred == 1) & (y_true == 0))
-        fn = np.sum((y_pred == 0) & (y_true == 1))
+            tp = np.sum((y_pred == 1) & (y_true == 1))
+            fp = np.sum((y_pred == 1) & (y_true == 0))
+            fn = np.sum((y_pred == 0) & (y_true == 1))
 
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+            recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
 
         metrics = {
             'loss': float(loss),

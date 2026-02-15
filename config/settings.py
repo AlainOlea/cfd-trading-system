@@ -132,11 +132,11 @@ ML_CONFIG = {
     'lookback_window': 60,           # 60 timesteps (60 min for 1m data)
     'features': ['open', 'high', 'low', 'close', 'volume', 'rsi', 'macd', 'bb_upper', 'bb_lower'],
     'batch_size': 32,
-    'epochs': 50,
+    'epochs': 100,                   # Aumentado: 50 → 100 para mejor convergencia
     'validation_split': 0.15,
     'test_split': 0.15,
-    'early_stopping_patience': 10,
-    'learning_rate': 0.001,
+    'early_stopping_patience': 20,   # Aumentado: 10 → 20 para más paciencia
+    'learning_rate': 0.0005,         # Reducido: 0.001 → 0.0005 para aprendizaje más suave
     # Walk-forward validation parameters
     'walk_forward': {
         'enabled': False,            # Enable walk-forward validation
@@ -153,8 +153,8 @@ ML_CONFIG = {
 LSTM_LAYERS = {
     'lstm1_units': 50,
     'lstm2_units': 50,
-    'dropout_rate': 0.3,             # Increased from 0.2 for better regularization
-    'l2_regularization': 0.01,       # L2 regularization strength
+    'dropout_rate': 0.4,             # Aumentado: 0.3 → 0.4 para mayor regularización
+    'l2_regularization': 0.02,       # Aumentado: 0.01 → 0.02 para penalización más fuerte
     'use_batch_norm': True,          # Use batch normalization after LSTM
 }
 
