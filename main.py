@@ -19,6 +19,7 @@ from pathlib import Path
 from datetime import datetime
 import sys
 import os
+import pandas as pd
 
 # Configure GPU for RTX 5060 compatibility (before TensorFlow import)
 from config.gpu_config import configure_gpu
@@ -29,7 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config.settings import (
     DEFAULT_TICKERS, SCALPING_INTERVAL, SWING_INTERVAL,
-    LOG_FILE, LOG_LEVEL, DATA_DIR, RAW_DATA_DIR
+    LOG_FILE, LOG_LEVEL, DATA_DIR, RAW_DATA_DIR,
+    INITIAL_CAPITAL
 )
 
 # Configure logging
@@ -121,15 +123,19 @@ def fetch_data(ticker, interval, days, source):
               help='Data interval')
 @click.option('--start-date', help='Start date (YYYY-MM-DD)')
 @click.option('--end-date', help='End date (YYYY-MM-DD)')
-@click.option('--initial-capital', default=10000, type=float, help='Initial capital')
-def backtest(strategy, ticker, interval, start_date, end_date, initial_capital):
+@click.option('--initial-capital', default=INITIAL_CAPITAL, type=float, help='Initial capital')
+@click.option('--use-ml', is_flag=True, help='Use ML filter in backtest')
+@click.option('--delay', type=float, default=0.0, help='Delay between ML predictions (seconds)')
+def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, use_ml, delay):
     """Run backtesting on a strategy."""
     try:
         click.echo(f"\n📊 Running backtest...")
         click.echo(f"   Strategy: {strategy}")
         click.echo(f"   Ticker: {ticker}")
         click.echo(f"   Interval: {interval}")
-        click.echo(f"   Capital: ${initial_capital:,.0f}")
+        click.echo(f"   Capital: ${initial_capital:,.2f}")
+        if use_ml:
+            click.echo(f"   ML Filter: ✅ Enabled (Delay: {delay}s)")
 
         from data.fetcher import DataFetcher
         from data.processor import DataProcessor
@@ -153,24 +159,53 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital):
             fetcher.save_to_csv(df, ticker, interval)
             click.echo(f"   Fetched {len(df)} rows")
 
-        # Filter by date range if provided
-        if start_date:
-            df = df[df.index >= start_date]
-        if end_date:
-            df = df[df.index <= end_date]
-
         # 2. Add indicators
         click.echo(f"   Computing indicators...")
         df = TechnicalIndicators.add_all_indicators(df)
 
-        # 3. Initialize strategy and engine
+        # 3. Initialize strategy, predictor and engine
         strategy_cls = STRATEGY_MAP[strategy]
         strat = strategy_cls()
+        
+        predictor = None
+        if use_ml:
+            from models.predictor import PricePredictor
+            predictor = PricePredictor()
+            try:
+                predictor.load(ticker, interval)
+            except Exception as e:
+                click.echo(f"   ⚠️ Could not load ML model: {e}. Running without ML.")
+                predictor = None
+                
         engine = BacktestEngine(initial_capital=initial_capital)
 
         # 4. Run backtest
         click.echo(f"   Running simulation...")
-        result = engine.run(strat, df, ticker=ticker, interval=interval)
+        result = engine.run(strat, df, ticker=ticker, interval=interval, predictor=predictor, delay_sec=delay)
+
+        # 4.5 Filter result by date if provided (AFTER backtest to keep history for ML)
+        if start_date or end_date:
+            mask = pd.Series(True, index=result.signals_df.index)
+            if start_date:
+                mask &= (result.signals_df.index >= start_date)
+            if end_date:
+                mask &= (result.signals_df.index <= end_date)
+            
+            filtered_signals = result.signals_df[mask]
+            
+            # Re-run VectorBT on the filtered signals
+            import vectorbt as vbt
+            new_portfolio = vbt.Portfolio.from_signals(
+                close=filtered_signals['close'],
+                entries=filtered_signals['signal'] == 'BUY',
+                exits=filtered_signals['signal'] == 'SELL',
+                init_cash=initial_capital,
+                fees=engine.commission,
+                slippage=engine.slippage,
+                freq=engine._interval_to_freq(interval),
+            )
+            result.portfolio = new_portfolio
+            result.signals_df = filtered_signals
 
         # 5. Calculate metrics
         metrics = PerformanceMetrics.calculate_all(result)

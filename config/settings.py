@@ -228,7 +228,7 @@ INDICATORS_TO_CALCULATE = [
 # ============================================
 
 # Signal confidence thresholds
-SIGNAL_CONFIDENCE_HIGH = 0.8
+SIGNAL_CONFIDENCE_HIGH = 0.65
 SIGNAL_CONFIDENCE_MEDIUM = 0.6
 SIGNAL_CONFIDENCE_LOW = 0.4
 

@@ -5,6 +5,7 @@ Runs strategy backtests using VectorBT for high-performance simulation.
 """
 
 import logging
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -46,6 +47,8 @@ class BacktestEngine:
         df: pd.DataFrame,
         ticker: str = '',
         interval: str = '',
+        predictor=None,
+        delay_sec: float = 0.0,
     ) -> BacktestResult:
         """Run a backtest for a given strategy on OHLCV+indicators data.
 
@@ -54,14 +57,41 @@ class BacktestEngine:
             df: DataFrame with OHLCV + indicator columns.
             ticker: Ticker symbol for labeling.
             interval: Data interval for labeling.
+            predictor: Optional PricePredictor instance for ML filtering.
+            delay_sec: Delay between ML predictions to avoid rate limits (if applicable).
 
         Returns:
             BacktestResult with portfolio and metrics.
         """
         logger.info(f"Running backtest: {strategy.name} on {ticker} ({interval})")
+        if predictor:
+            logger.info("ML Filter enabled for backtesting")
 
-        # Generate signals
-        signals_df = strategy.generate_signals(df)
+        # Generate base technical signals
+        signals_df = strategy.generate_signals(df).copy()
+
+        # Apply ML filter if predictor is provided
+        if predictor:
+            click_available = False
+            try:
+                import click
+                click_available = True
+            except ImportError:
+                pass
+
+            # We iterate through the technical signals and validate them with ML
+            # This is slower than vectorbt but necessary for ML filtering
+            technical_signals = signals_df[signals_df['signal'].isin(['BUY', 'SELL'])]
+            
+            if click_available:
+                import click
+                label = f"Filtering {len(technical_signals)} signals with ML"
+                with click.progressbar(technical_signals.index, label=label) as bar:
+                    for idx in bar:
+                        self._process_ml_row(idx, signals_df, df, predictor, delay_sec)
+            else:
+                for idx in technical_signals.index:
+                    self._process_ml_row(idx, signals_df, df, predictor, delay_sec)
 
         # Convert signals to boolean entry/exit arrays
         entries = signals_df['signal'] == 'BUY'
@@ -92,6 +122,35 @@ class BacktestEngine:
             f"Return: {portfolio.stats()['Total Return [%]']:.2f}%"
         )
         return result
+
+    def _process_ml_row(self, idx, signals_df, df, predictor, delay_sec):
+        """Internal helper to process a single signal row with ML."""
+        # Get data slice up to current index for prediction
+        df_slice = df.loc[:idx]
+        
+        # Ensure we have enough data for the predictor's lookback window
+        lookback = getattr(predictor, 'lookback_window', 60)
+        if len(df_slice) < lookback:
+            logger.warning(f"Skipping ML filter for {idx}: Not enough history ({len(df_slice)} < {lookback})")
+            return
+
+        # Predict
+        try:
+            prediction = predictor.predict_next(df_slice)
+            
+            # Filter
+            tech_signal = signals_df.loc[idx, 'signal']
+            filter_result = predictor.filter_signal(tech_signal, prediction)
+            
+            if not filter_result['accepted']:
+                logger.info(f"ML filter REJECTED {tech_signal} at {idx}: {filter_result['reason']}")
+                signals_df.at[idx, 'signal'] = 'HOLD'
+                signals_df.at[idx, 'confidence'] = 0.0
+        except Exception as e:
+            logger.error(f"Error in ML prediction at {idx}: {e}")
+            
+        if delay_sec > 0:
+            time.sleep(delay_sec)
 
     @staticmethod
     def _interval_to_freq(interval: str) -> str | None:
