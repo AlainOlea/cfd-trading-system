@@ -529,9 +529,9 @@ class ModelTrainer:
         model_dir = MODELS_SAVED_DIR / f"{safe_ticker}_{interval}"
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save model weights
-        weights_path = model_dir / "model.weights.h5"
-        model.model.save_weights(str(weights_path))
+        # Save complete model (includes BatchNormalization variables)
+        model_path = model_dir / "model.keras"
+        model.model.save(str(model_path))
 
         # Save scaler
         scaler_path = model_dir / "scaler.pkl"
@@ -570,6 +570,7 @@ class ModelTrainer:
         """
         import joblib
         import json
+        import tensorflow as tf
 
         safe_ticker = ticker.replace('/', '_').replace('-', '_')
         model_dir = MODELS_SAVED_DIR / f"{safe_ticker}_{interval}"
@@ -581,7 +582,14 @@ class ModelTrainer:
         with open(model_dir / "metadata.json") as f:
             meta = json.load(f)
 
-        # Rebuild model with same architecture
+        # Load complete model from .keras file (with custom layer support)
+        from models.hybrid_model import TransformerEncoderBlock
+        keras_model = tf.keras.models.load_model(
+            str(model_dir / "model.keras"),
+            custom_objects={'TransformerEncoderBlock': TransformerEncoderBlock}
+        )
+
+        # Wrap in HybridLSTMTransformer for consistency
         hybrid = HybridLSTMTransformer(
             lstm1_units=meta['lstm1_units'],
             lstm2_units=meta['lstm2_units'],
@@ -589,11 +597,7 @@ class ModelTrainer:
             n_heads=meta['n_heads'],
             ff_dim=meta['ff_dim'],
         )
-        input_shape = (meta['lookback_window'], len(meta['features']))
-        hybrid.build(input_shape)
-
-        # Load weights
-        hybrid.model.load_weights(str(model_dir / "model.weights.h5"))
+        hybrid.model = keras_model
 
         # Load scaler
         scaler = joblib.load(str(model_dir / "scaler.pkl"))

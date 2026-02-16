@@ -11,8 +11,8 @@
     "bb_lower"
   ],
   "lookback_window": 60,
-  "ticker": "QQQ",
-  "interval": "1h",
+  "ticker": "BTC-USD",
+  "interval": "1d",
   "lstm1_units": 50,
   "lstm2_units": 50,
   "d_model": 64,
