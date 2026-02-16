@@ -35,6 +35,9 @@ class Signal:
     timestamp: datetime = field(default_factory=datetime.now)
     ml_filtered: bool = False
     ml_confidence: float | None = None
+    ensemble_consensus: str | None = None        # STRONG, WEAK, None
+    news_sentiment: dict | None = None           # {sentiment, confidence, headline}
+    confluence_score: int = 0                    # 0-5 stars
 
     @property
     def risk_reward_ratio(self) -> float | None:
@@ -62,6 +65,9 @@ class Signal:
             'risk_reward': self.risk_reward_ratio or '',
             'ml_filtered': self.ml_filtered,
             'ml_confidence': self.ml_confidence if self.ml_confidence is not None else '',
+            'ensemble_consensus': self.ensemble_consensus or '',
+            'news_sentiment': self.news_sentiment.get('sentiment', {}).get('sentiment', '') if self.news_sentiment else '',
+            'confluence_score': self.confluence_score,
         }
 
 
@@ -192,23 +198,45 @@ class SignalGenerator:
     def _apply_ml_filter(self, signal: Signal, df: pd.DataFrame) -> Signal:
         """Apply ML model prediction as a filter on the signal.
 
+        Uses lower thresholds to combine technical signals with ML predictions:
+        - If technical signal is strong (BUY/SELL), keep it if ML doesn't strongly disagree
+        - If technical signal is HOLD but ML has high confidence (>55%), use ML signal
+        - If both signals agree, boost confidence
+
         If ML model is not available, returns the signal unchanged with a warning.
         """
         try:
             from models.predictor import PricePredictor
-            predictor = PricePredictor()
+            predictor = PricePredictor(confidence_threshold=0.55)  # Lower threshold for combining
             predictor.load(signal.ticker, signal.interval)
             prediction = predictor.predict_next(df)
 
             signal.ml_filtered = True
             signal.ml_confidence = prediction.get('confidence', 0)
+            ml_direction = prediction['direction']
+            ml_confidence = prediction['confidence']
 
-            # Filter using the predictor's logic
-            filter_result = predictor.filter_signal(signal.direction, prediction)
-            if not filter_result['accepted']:
-                logger.info(f"ML filter rejected: {filter_result['reason']}")
-                signal.direction = 'HOLD'
-                signal.confidence = 0.0
+            # Combine signals with lower thresholds
+            if signal.direction == 'HOLD':
+                # Technical signal is HOLD: use ML signal if it has high confidence (>55%)
+                if ml_confidence > 0.55:
+                    logger.info(f"ML overrides HOLD with {ml_direction} ({ml_confidence:.1%} confidence)")
+                    signal.direction = ml_direction
+                    signal.confidence = ml_confidence
+            elif signal.direction == ml_direction:
+                # Both signals agree: boost confidence
+                combined_confidence = min(1.0, (signal.confidence + ml_confidence) / 2)
+                logger.info(f"ML confirms {signal.direction} - combined confidence: {combined_confidence:.2f}")
+                signal.confidence = combined_confidence
+            else:
+                # Signals disagree: only reject if ML has high opposing confidence (>65%)
+                if ml_confidence > 0.65:
+                    logger.info(f"ML strongly disagrees ({ml_direction} {ml_confidence:.1%}). Rejecting signal.")
+                    signal.direction = 'HOLD'
+                    signal.confidence = 0.0
+                else:
+                    # Keep technical signal if ML opposition is weak (<65%)
+                    logger.info(f"ML weakly disagrees ({ml_direction} {ml_confidence:.1%}). Keeping technical signal.")
 
         except (ImportError, FileNotFoundError) as e:
             logger.warning(f"ML model not available ({e}). Signal passed without ML filter.")
@@ -221,7 +249,7 @@ class SignalGenerator:
         days_map = {
             '1m': 7,       # 7 days of minute data (~2700 bars)
             '5m': 30,      # 30 days (~1700 bars)
-            '15m': 60,     # 60 days (~1600 bars)
+            '15m': 55,     # 55 days (~1400 bars) - Yahoo limit is 60d, use 55 for safety
             '1h': 90,      # 90 days (~1500 bars)
             '1d': 365,     # 1 year (~250 bars, enough for SMA200)
         }

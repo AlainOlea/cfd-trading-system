@@ -14,6 +14,7 @@ docs/
 ├── README.md                          # This file - Documentation index
 │
 ├── guides/                            # Implementation guides and setup
+│   ├── UNIFIED_PIPELINE_IMPLEMENTATION.md  # Unified signal pipeline guide (NEW)
 │   ├── INTEGRATION_SUMMARY.md         # Complete system integration overview
 │   ├── ML_RETRAINING_IMPLEMENTATION.md # ML model retraining (Phase 1-5)
 │   ├── NEWS_ANALYZER_SETUP.md         # News sentiment analysis setup
@@ -26,6 +27,8 @@ docs/
 │   └── PROMPT_OPTIMIZATION.md         # Detailed prompt analysis (V1-V3)
 │
 ├── analysis/                          # Technical analysis and status reports
+│   ├── SESSION_CHANGELOG.md            # Session changelog (NEW)
+│   ├── FRESH_DATA_FIX.md              # Fresh data fix analysis (NEW)
 │   ├── TRADING_SYSTEM_COMPLETE.md    # Complete system analysis
 │   ├── IMPLEMENTATION_COMPLETE.md     # Implementation status and features
 │   └── GPU_CUDA_SUMMARY.md            # GPU configuration analysis
@@ -76,13 +79,20 @@ docs/
 ## 📖 Complete Document List
 
 ### 🔧 **Guides** (Setup & Implementation)
-1. **[INTEGRATION_SUMMARY.md](guides/INTEGRATION_SUMMARY.md)** (11 KB)
+1. **[UNIFIED_PIPELINE_IMPLEMENTATION.md](guides/UNIFIED_PIPELINE_IMPLEMENTATION.md)** (13 KB) ⭐ NEW
+   - Unified signal pipeline guide
+   - Architecture and components
+   - Usage examples (CLI and programmatic)
+   - Migration from legacy scripts
+   - Fresh data fetching explanation
+
+2. **[INTEGRATION_SUMMARY.md](guides/INTEGRATION_SUMMARY.md)** (11 KB)
    - Complete system integration overview
    - Features and capabilities
    - Real-world examples
    - Performance metrics
 
-2. **[ML_RETRAINING_IMPLEMENTATION.md](guides/ML_RETRAINING_IMPLEMENTATION.md)** (16 KB)
+3. **[ML_RETRAINING_IMPLEMENTATION.md](guides/ML_RETRAINING_IMPLEMENTATION.md)** (16 KB)
    - 5-phase ML retraining plan
    - Walk-forward validation
    - Multi-ticker training
@@ -123,19 +133,33 @@ docs/
    - Testing results
 
 ### 📊 **Analysis** (Status & Research)
-1. **[TRADING_SYSTEM_COMPLETE.md](analysis/TRADING_SYSTEM_COMPLETE.md)**
+1. **[SESSION_CHANGELOG.md](analysis/SESSION_CHANGELOG.md)** (10 KB) ⭐ NEW
+   - Session 2026-02-15 changelog
+   - Unified pipeline implementation
+   - Fresh data fix details
+   - Files created/modified
+   - Performance improvements
+
+2. **[FRESH_DATA_FIX.md](analysis/FRESH_DATA_FIX.md)** (9 KB) ⭐ NEW
+   - Technical analysis of cache bug fix
+   - Problem description with examples
+   - Solution implementation
+   - Performance impact
+   - Developer migration guide
+
+3. **[TRADING_SYSTEM_COMPLETE.md](analysis/TRADING_SYSTEM_COMPLETE.md)**
    - Complete system analysis
    - Architecture overview
    - All implemented features
    - Performance data
 
-2. **[IMPLEMENTATION_COMPLETE.md](analysis/IMPLEMENTATION_COMPLETE.md)**
+4. **[IMPLEMENTATION_COMPLETE.md](analysis/IMPLEMENTATION_COMPLETE.md)**
    - Implementation status
    - Phase completion tracking
    - Key metrics
    - Next steps
 
-3. **[GPU_CUDA_SUMMARY.md](analysis/GPU_CUDA_SUMMARY.md)**
+5. **[GPU_CUDA_SUMMARY.md](analysis/GPU_CUDA_SUMMARY.md)**
    - GPU configuration analysis
    - CUDA toolkit information
    - Performance metrics
@@ -216,13 +240,13 @@ docs/
 
 | Category | Documents | Status |
 |----------|-----------|--------|
-| **Guides** | 6 files | ✅ Complete |
+| **Guides** | 7 files | ✅ Complete |
 | **Prompts** | 2 files | ✅ Complete |
-| **Analysis** | 3 files | ✅ Complete |
+| **Analysis** | 5 files | ✅ Complete |
 | **Quick Start** | 2 files | ✅ Complete |
 | **Reference** | 3 files | ✅ Complete |
 | **Tests** | TBD | 📝 Coming Soon |
-| **TOTAL** | **19 files** | ✅ Organized |
+| **TOTAL** | **22 files** | ✅ Organized |
 
 ### By Size
 

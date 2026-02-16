@@ -19,6 +19,7 @@ _CSV_HEADERS = [
     'timestamp', 'strategy', 'ticker', 'interval', 'direction',
     'entry_price', 'stop_loss', 'take_profit', 'confidence',
     'risk_reward', 'ml_filtered', 'ml_confidence',
+    'ensemble_consensus', 'news_sentiment', 'confluence_score',
 ]
 
 

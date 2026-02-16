@@ -314,15 +314,39 @@ MIN_PRICE_MOVEMENT = 0.0001
 # Market hours per instrument type (UTC, 24-hour format)
 # Plus500 CFD hours vary by instrument
 MARKET_HOURS = {
-    'indices': {'open': 14, 'close': 21, 'days': [0, 1, 2, 3, 4]},       # Mon-Fri 9:30-4 ET -> 14-21 UTC
+    'indices': {'open': 23, 'close': 21, 'days': [0, 1, 2, 3, 4, 5, 6]},  # Sun 23-Fri 21 UTC (CFD extended hours)
     'stocks': {'open': 14, 'close': 21, 'days': [0, 1, 2, 3, 4]},        # Mon-Fri 9:30-4 ET -> 14-21 UTC
-    'commodities': {'open': 23, 'close': 22, 'days': [0, 1, 2, 3, 4]},   # Near 24h Sun-Fri (gold, oil CFDs)
+    'commodities': {'open': 23, 'close': 22, 'days': [0, 1, 2, 3, 4, 5, 6]},   # Nearly 24h Sun-Fri (gold, oil CFDs)
     'crypto': {'open': 0, 'close': 24, 'days': [0, 1, 2, 3, 4, 5, 6]},   # 24/7
 }
 
 # Watch mode defaults
 WATCH_INTERVAL_SECONDS = 900  # 15 minutes default
 WATCH_STRATEGIES = ['macd_vwap', 'rsi_bb']  # Default strategies for watch mode
+
+# ============================================
+# UNIFIED PIPELINE CONFIGURATION
+# ============================================
+
+# Unified pipeline ticker configurations
+# Each tuple: (ticker, category, intervals, strategies, use_ml, use_ensemble, use_news, confluence_min)
+# Loaded lazily by signals.pipeline to avoid circular imports
+PIPELINE_TICKERS_RAW = [
+    # Indices
+    ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('QQQ', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('IWM', 'indices', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    # Commodities
+    ('GLD', 'commodities', ['1d', '1h', '15m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    # Stocks
+    ('AAPL', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('NVDA', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('MSFT', 'stocks', ['1d'], ['macd_vwap'], True, True, True, 2),
+    # Crypto
+    ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('ETH-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('SOL-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, False, 2),
+]
 
 print("✅ Configuration loaded successfully")
 print(f"📊 Backtesting capital: ${INITIAL_CAPITAL:,.0f}")

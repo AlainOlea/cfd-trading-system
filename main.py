@@ -437,12 +437,13 @@ def status():
               help='Data interval')
 @click.option('--use-ml', is_flag=True, help='Use ML prediction filter')
 def scan(strategies, tickers, interval, use_ml):
-    """Scan multiple tickers with multiple strategies."""
+    """Scan multiple tickers with multiple strategies.
+
+    Now powered by UnifiedPipeline internally.
+    """
     try:
         from config.settings import TICKERS
-        from signals.generator import SignalGenerator
-        from signals.manager import SignalManager
-        from signals.telegram_bot import TelegramNotifier
+        from signals.pipeline import UnifiedPipeline, TickerConfig
 
         strategy_list = [s.strip() for s in strategies.split(',')]
         if tickers:
@@ -450,33 +451,58 @@ def scan(strategies, tickers, interval, use_ml):
         else:
             ticker_list = [t for group in TICKERS.values() for t in group]
 
-        click.echo(f"\n🔍 Scanning {len(ticker_list)} tickers x {len(strategy_list)} strategies...")
+        click.echo(f"\n  Scanning {len(ticker_list)} tickers x {len(strategy_list)} strategies...")
         click.echo(f"   Interval: {interval} | ML: {'ON' if use_ml else 'OFF'}")
 
-        generator = SignalGenerator()
+        # Build TickerConfig list from scan parameters
+        ticker_category = {}
+        for category, syms in TICKERS.items():
+            for sym in syms:
+                ticker_category[sym] = category
+
+        configs = [
+            TickerConfig(
+                ticker=t,
+                category=ticker_category.get(t, 'stocks'),
+                intervals=[interval],
+                strategies=strategy_list,
+                use_ml=use_ml,
+                use_ensemble=use_ml,  # ensemble only if ML is on
+                use_news=False,       # scan is meant to be fast
+            )
+            for t in ticker_list
+        ]
+
+        pipe = UnifiedPipeline(
+            use_ml=use_ml,
+            use_ensemble=use_ml,
+            use_news=False,
+            send_telegram=True,
+        )
+
+        results = pipe.run_all(configs=configs)
+
+        # Display actionable results
+        for result in results:
+            if result.is_actionable():
+                click.echo(pipe.format_result(result))
+
+        click.echo(pipe.format_summary(results))
+
+        # Send Telegram
+        sent = pipe.notify_actionable(results)
+        if sent:
+            click.echo(f"\n   Telegram: {sent} notification(s) sent")
+
+        # Log signals
+        from signals.manager import SignalManager
         manager = SignalManager()
-        notifier = TelegramNotifier()
-        actionable = []
-
-        for ticker in ticker_list:
-            for strat_name in strategy_list:
-                try:
-                    sig = generator.generate(strat_name, ticker, interval, use_ml=use_ml)
-                    manager.log_signal(sig)
-                    if sig.direction != 'HOLD':
-                        actionable.append(sig)
-                        click.echo(manager.format_signal(sig))
-                        if notifier.is_configured:
-                            notifier.send_signal(sig)
-                except Exception as e:
-                    click.echo(f"   SKIP {strat_name}/{ticker}: {e}", err=True)
-
-        click.echo(f"\n📊 Scan complete: {len(actionable)} actionable signals found")
-        if not actionable:
-            click.echo("   No BUY/SELL signals at this time.")
+        for result in results:
+            if result.is_actionable():
+                manager.log_signal(result.technical_signal)
 
     except Exception as e:
-        click.echo(f"\n❌ Error scanning: {str(e)}", err=True)
+        click.echo(f"\n  Error scanning: {str(e)}", err=True)
         logger.error(f"Error scanning: {e}", exc_info=True)
         sys.exit(1)
 
@@ -495,12 +521,13 @@ def scan(strategies, tickers, interval, use_ml):
               help='Seconds between scans (default: 900 = 15 min)')
 @click.option('--use-ml', is_flag=True, help='Use ML prediction filter')
 def watch(strategies, tickers, interval, every, use_ml):
-    """Continuously monitor markets and send alerts. Press Ctrl+C to stop."""
+    """Continuously monitor markets and send alerts. Press Ctrl+C to stop.
+
+    Now powered by UnifiedPipeline internally.
+    """
     import time
     from config.settings import MARKET_HOURS, TICKERS as TICKER_GROUPS
-    from signals.generator import SignalGenerator
-    from signals.manager import SignalManager
-    from signals.telegram_bot import TelegramNotifier
+    from signals.pipeline import UnifiedPipeline, TickerConfig
 
     strategy_list = [s.strip() for s in strategies.split(',')]
     ticker_list = [t.strip() for t in tickers.split(',')]
@@ -511,11 +538,28 @@ def watch(strategies, tickers, interval, every, use_ml):
         for sym in syms:
             ticker_category[sym] = category
 
-    generator = SignalGenerator()
-    manager = SignalManager()
-    notifier = TelegramNotifier()
+    # Build TickerConfig list
+    configs = [
+        TickerConfig(
+            ticker=t,
+            category=ticker_category.get(t, 'stocks'),
+            intervals=[interval],
+            strategies=strategy_list,
+            use_ml=use_ml,
+            use_ensemble=use_ml,
+            use_news=False,
+        )
+        for t in ticker_list
+    ]
 
-    click.echo(f"\n👁️  Watch mode started")
+    pipe = UnifiedPipeline(
+        use_ml=use_ml,
+        use_ensemble=use_ml,
+        use_news=False,
+        send_telegram=True,
+    )
+
+    click.echo(f"\n  Watch mode started")
     click.echo(f"   Tickers: {', '.join(ticker_list)}")
     click.echo(f"   Strategies: {', '.join(strategy_list)}")
     click.echo(f"   Interval: {interval}")
@@ -530,38 +574,118 @@ def watch(strategies, tickers, interval, every, use_ml):
             now = datetime.now(tz=__import__('datetime').timezone.utc).replace(tzinfo=None)
             click.echo(f"--- Scan #{scan_count} at {now.strftime('%H:%M:%S UTC')} ---")
 
-            actionable_count = 0
-            for ticker in ticker_list:
-                # Check market hours
-                category = ticker_category.get(ticker, 'stocks')
-                hours = MARKET_HOURS.get(category, MARKET_HOURS['stocks'])
+            # Filter configs by market hours
+            open_configs = []
+            for config in configs:
+                hours = MARKET_HOURS.get(config.category, MARKET_HOURS['stocks'])
+                if _is_market_open(now, hours):
+                    open_configs.append(config)
+                else:
+                    click.echo(f"   {config.ticker} ({config.category}): market closed")
 
-                if not _is_market_open(now, hours):
-                    click.echo(f"   {ticker} ({category}): market closed")
-                    continue
+            if open_configs:
+                results = pipe.run_all(configs=open_configs)
 
-                for strat_name in strategy_list:
-                    try:
-                        sig = generator.generate(strat_name, ticker, interval, use_ml=use_ml)
-                        if sig.direction != 'HOLD':
-                            actionable_count += 1
-                            manager.log_signal(sig)
-                            click.echo(manager.format_signal(sig))
-                            if notifier.is_configured:
-                                notifier.send_signal(sig)
-                        else:
-                            click.echo(f"   {strat_name}/{ticker}: HOLD")
-                    except Exception as e:
-                        click.echo(f"   {strat_name}/{ticker}: ERROR - {e}")
+                actionable = [r for r in results if r.is_actionable()]
+                for result in actionable:
+                    click.echo(pipe.format_result(result))
 
-            if actionable_count == 0:
-                click.echo(f"   No actionable signals this scan.")
+                # Send Telegram
+                pipe.notify_actionable(results)
+
+                # Log signals
+                from signals.manager import SignalManager
+                manager = SignalManager()
+                for result in actionable:
+                    manager.log_signal(result.technical_signal)
+
+                if not actionable:
+                    click.echo(f"   No actionable signals this scan.")
+            else:
+                click.echo(f"   All markets closed.")
 
             click.echo(f"   Next scan in {every}s...\n")
             time.sleep(every)
 
     except KeyboardInterrupt:
-        click.echo(f"\n\n⏹️  Watch stopped after {scan_count} scans")
+        click.echo(f"\n\n  Watch stopped after {scan_count} scans")
+
+
+# ============================================
+# COMMAND: PIPELINE (unified signal generation)
+# ============================================
+
+@cli.command('pipeline')
+@click.option('--category', default='all',
+              type=click.Choice(['all', 'indices', 'stocks', 'crypto', 'commodities']),
+              help='Filter by asset category')
+@click.option('--ticker', default=None, help='Run for a specific ticker only')
+@click.option('--no-ml', is_flag=True, help='Skip ML predictions')
+@click.option('--no-ensemble', is_flag=True, help='Skip ensemble voting')
+@click.option('--no-news', is_flag=True, help='Skip news sentiment analysis')
+@click.option('--telegram/--no-telegram', default=True, help='Send Telegram notifications')
+def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
+    """Run unified signal pipeline across all configured tickers.
+
+    Consolidates technical analysis, ML prediction, ensemble voting,
+    and news sentiment into a single flow.
+    """
+    try:
+        from signals.pipeline import UnifiedPipeline
+
+        click.echo(f"\n{'='*65}")
+        click.echo(f"  UNIFIED SIGNAL PIPELINE")
+        click.echo(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        click.echo(f"{'='*65}")
+        click.echo(f"  Category:  {category}")
+        if ticker:
+            click.echo(f"  Ticker:    {ticker}")
+        click.echo(f"  ML:        {'OFF' if no_ml else 'ON'}")
+        click.echo(f"  Ensemble:  {'OFF' if no_ensemble else 'ON'}")
+        click.echo(f"  News:      {'OFF' if no_news else 'ON'}")
+        click.echo(f"  Telegram:  {'ON' if telegram else 'OFF'}")
+        click.echo(f"{'='*65}\n")
+
+        pipe = UnifiedPipeline(
+            use_ml=not no_ml,
+            use_ensemble=not no_ensemble,
+            use_news=not no_news,
+            send_telegram=telegram,
+        )
+
+        results = pipe.run_all(
+            category=category if category != 'all' else None,
+            ticker_filter=ticker,
+        )
+
+        # Display individual results
+        for result in results:
+            if result.is_actionable():
+                click.echo(pipe.format_result(result))
+
+        # Display summary
+        click.echo(pipe.format_summary(results))
+
+        # Send Telegram notifications
+        if telegram:
+            sent = pipe.notify_actionable(results)
+            if sent:
+                click.echo(f"\n  Telegram: {sent} notification(s) sent")
+
+        # Log actionable signals
+        from signals.manager import SignalManager
+        manager = SignalManager()
+        for result in results:
+            if result.is_actionable():
+                manager.log_signal(result.technical_signal)
+
+        logger.info(f"Pipeline completed: {len(results)} results, "
+                    f"{sum(1 for r in results if r.is_actionable())} actionable")
+
+    except Exception as e:
+        click.echo(f"\n  Error running pipeline: {str(e)}", err=True)
+        logger.error(f"Error running pipeline: {e}", exc_info=True)
+        sys.exit(1)
 
 
 def _is_market_open(now: datetime, hours: dict) -> bool:

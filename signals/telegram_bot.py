@@ -77,11 +77,22 @@ class TelegramNotifier:
         """Send a message using the Telegram bot (async wrapper)."""
         try:
             bot = self._get_bot()
-            asyncio.run(bot.send_message(
-                chat_id=self.chat_id,
-                text=text,
-                parse_mode='Markdown',
-            ))
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(bot.send_message(
+                    chat_id=self.chat_id,
+                    text=text,
+                    parse_mode='Markdown',
+                ))
+            except Exception:
+                # Fallback: retry without Markdown if parsing fails
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(bot.send_message(
+                    chat_id=self.chat_id,
+                    text=text,
+                ))
+            finally:
+                loop.close()
             logger.info("Telegram message sent successfully")
             return True
         except Exception as e:
