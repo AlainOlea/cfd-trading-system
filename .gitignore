@@ -38,6 +38,18 @@ logs/*.txt
 models/saved/*.h5
 models/saved/*.keras
 models/saved/*.pkl
+models/saved/**/model.keras
+models/saved.backup*/
+
+# Backtesting results (generated files)
+results/*.html
+results/*.json
+results/*.csv
+
+# Working files
+TODO.md
+*.todo
+.todo/
 
 # IDE
 .vscode/
