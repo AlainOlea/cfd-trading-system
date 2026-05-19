@@ -49,7 +49,12 @@ class TechnicalIndicators:
         df = cls.add_atr(df)
         df = cls.add_obv(df)
 
-        logger.info(f"Added {len(df.columns) - 5} indicator columns to DataFrame")
+        # Engineered features (returns, volatility, ratios)
+        df = cls.add_returns(df)
+        df = cls.add_volatility(df)
+        df = cls.add_atr_ratio(df)
+
+        logger.info(f"Added {len(df.columns) - 5} indicator/feature columns to DataFrame")
         return df
 
     @staticmethod
@@ -216,4 +221,36 @@ class TechnicalIndicators:
         obv = ta.obv(df['close'], df['volume'])
         if obv is not None:
             df['obv'] = obv
+        return df
+
+    @staticmethod
+    def add_returns(df: pd.DataFrame) -> pd.DataFrame:
+        """Add rolling returns over multiple horizons.
+
+        Columns added: return_5d, return_20d
+        """
+        close = df['close']
+        df['return_5d'] = close.pct_change(5)
+        df['return_20d'] = close.pct_change(20)
+        return df
+
+    @staticmethod
+    def add_volatility(df: pd.DataFrame, period: int = 20) -> pd.DataFrame:
+        """Add rolling volatility (standard deviation of returns).
+
+        Columns added: volatility_20d
+        """
+        df['volatility_20d'] = df['close'].pct_change().rolling(period).std()
+        return df
+
+    @staticmethod
+    def add_atr_ratio(df: pd.DataFrame) -> pd.DataFrame:
+        """Add ATR as a ratio of close price (normalized volatility).
+
+        Columns added: atr_ratio
+        """
+        if 'atr' in df.columns:
+            df['atr_ratio'] = df['atr'] / df['close']
+        else:
+            df['atr_ratio'] = 0.0
         return df

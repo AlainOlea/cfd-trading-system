@@ -324,12 +324,26 @@ class UnifiedPipeline:
         return df
 
     def _apply_ml(self, ticker: str, interval: str, df: pd.DataFrame) -> dict | None:
-        """Apply single ML model prediction."""
+        """Apply ML prediction (prefers cross-sectional XGBoost, falls back to per-ticker)."""
         try:
-            from models.predictor import PricePredictor
-            predictor = PricePredictor(confidence_threshold=0.55, allow_unpromoted=True)
-            predictor.load(ticker, interval)
-            return predictor.predict_next(df)
+            from config.settings import PRIMARY_ML_MODEL
+            if PRIMARY_ML_MODEL == 'xgboost':
+                from models.xgboost_model import XGBoostPredictor
+                predictor = XGBoostPredictor(confidence_threshold=0.55)
+                # Try cross-sectional model first, then per-ticker
+                for model_name in ['all_tickers', ticker]:
+                    try:
+                        predictor.load(model_name, interval)
+                        return predictor.predict_next(df)
+                    except FileNotFoundError:
+                        continue
+                logger.debug(f"XGBoost not available for {ticker} {interval}")
+                return None
+            else:
+                from models.predictor import PricePredictor
+                predictor = PricePredictor(confidence_threshold=0.55, allow_unpromoted=True)
+                predictor.load(ticker, interval)
+                return predictor.predict_next(df)
         except (ImportError, FileNotFoundError, Exception) as e:
             logger.debug(f"ML not available for {ticker} {interval}: {e}")
             return None

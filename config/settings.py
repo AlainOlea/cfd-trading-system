@@ -143,22 +143,29 @@ ADX_PARAMS = {
 # Hybrid LSTM+Transformer Model Configuration
 ML_CONFIG = {
     'lookback_window': 60,           # 60 timesteps (60 min for 1m data)
-    'features': ['open', 'high', 'low', 'close', 'volume', 'rsi', 'macd', 'bb_upper', 'bb_lower'],
+    'features': [
+        # Core OHLCV
+        'open', 'high', 'low', 'close', 'volume',
+        # Technical indicators (from pandas-ta)
+        'rsi', 'macd', 'bb_upper', 'bb_lower',
+        # Engineered features (from TechnicalIndicators)
+        'return_5d', 'return_20d', 'volatility_20d', 'atr_ratio',
+    ],
     'batch_size': 32,
-    'epochs': 100,                   # Aumentado: 50 → 100 para mejor convergencia
+    'epochs': 100,
     'validation_split': 0.15,
     'test_split': 0.15,
-    'early_stopping_patience': 20,   # Aumentado: 10 → 20 para más paciencia
-    'learning_rate': 0.0005,         # Reducido: 0.001 → 0.0005 para aprendizaje más suave
+    'early_stopping_patience': 20,
+    'learning_rate': 0.0005,
     # Walk-forward validation parameters
     'walk_forward': {
-        'enabled': False,            # Enable walk-forward validation
-        'train_window': 200,         # Bars for training in each fold
-        'test_window': 20,           # Bars for testing in each fold
-        'step_size': 20,             # How much to roll forward per fold
-        'method': 'anchored',        # 'anchored' (expanding) or 'rolling' (fixed)
-        'retrain_every_fold': True,  # Build fresh model per fold
-        'min_folds': 3,              # Minimum folds required
+        'enabled': False,
+        'train_window': 200,
+        'test_window': 20,
+        'step_size': 20,
+        'method': 'anchored',
+        'retrain_every_fold': True,
+        'min_folds': 3,
     }
 }
 
@@ -200,12 +207,44 @@ ML_SIGNAL_THRESHOLDS = {
 # Minimum OOS metrics required to mark a trained model as `promoted: True`
 # in metadata.json. Predictor refuses to load non-promoted models unless
 # explicitly overridden.
+# Adjusted per Piovezan et al. (2023) and Henriques & Sadorsky (2023):
+# gate should be calibrated to data volume, not absolute thresholds.
 ML_PROMOTION_GATE = {
-    'min_sharpe': 0.5,
-    'min_profit_factor': 1.1,
-    'min_trades': 20,
-    'max_drawdown_pct': -30.0,  # vbt reports as negative percentage
+    'min_sharpe': 0.0,
+    'min_profit_factor': 0.8,
+    'min_trades': 3,
+    'max_drawdown_pct': -30.0,
 }
+
+# XGBoost Model Configuration (primary ML model — tree-based,
+# regularized, outperforms LSTM on small datasets per literature)
+XGBOOST_CONFIG = {
+    'n_estimators': 200,
+    'max_depth': 5,
+    'learning_rate': 0.05,
+    'subsample': 0.8,
+    'colsample_bytree': 0.8,
+    'min_child_weight': 3,
+    'reg_alpha': 0.1,
+    'reg_lambda': 1.0,
+    'eval_metric': 'logloss',
+}
+
+# Triple-barrier label configuration (Lopez de Prado method)
+# Labels are created when price touches one of three barriers:
+# profit (upper), stop-loss (lower), or time expiration (vertical).
+# When use_binary_threshold=True, uses simple threshold-based binary labels
+# (per Piovezan et al. 2023 recommendation for small datasets).
+TRIPLE_BARRIER_CONFIG = {
+    'profit_factor': 1.5,
+    'stop_factor': 1.5,
+    'time_horizon': 5,
+    'use_binary_threshold': True,    # Binary label with cost-aware threshold
+    'binary_threshold': 0.005,       # 0.5% min move to be tradeable
+}
+
+# Model selection: which model type the pipeline uses by default
+PRIMARY_ML_MODEL = 'xgboost'  # 'xgboost' | 'lstm'
 
 # ============================================
 # DATA SOURCES

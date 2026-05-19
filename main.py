@@ -384,6 +384,93 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
         logger.error(f"Error training model: {e}", exc_info=True)
         sys.exit(1)
 
+
+@cli.command('train-xgb-cross')
+@click.option('--interval', default='1d', type=click.Choice(['1d', '1h']),
+              help='Data interval')
+@click.option('--tickers', default='SPY,QQQ,IWM,GLD,AAPL,NVDA,MSFT',
+              help='Comma-separated tickers to pool for cross-sectional training')
+@click.option('--no-triple-barrier', is_flag=True,
+              help='Use simple next-bar direction instead of triple barrier labels')
+def train_xgb_cross(interval, tickers, no_triple_barrier):
+    """Train one XGBoost model on ALL tickers pooled together (cross-sectional).
+
+    Per Alzaman (2024) and Byun et al. (2024), cross-sectional training
+    outperforms per-asset training by pooling information across assets.
+    Uses triple-barrier labels (Lopez de Prado method) by default.
+    """
+    try:
+        ticker_list = [t.strip() for t in tickers.split(',')]
+        use_triple = not no_triple_barrier
+
+        click.echo(f"\n  CROSS-SECTIONAL XGBOOST TRAINING")
+        click.echo(f"  {'=' * 60}")
+        click.echo(f"  Interval:          {interval}")
+        click.echo(f"  Tickers:           {len(ticker_list)} ({', '.join(ticker_list[:5])}...)")
+        click.echo(f"  Labels:            {'triple-barrier' if use_triple else 'next-bar direction'}")
+        click.echo()
+
+        from data.fetcher import DataFetcher
+        from data.processor import DataProcessor
+        from indicators.technical import TechnicalIndicators
+        from models.xgboost_model import XGBoostTrader
+        from config.settings import ML_PROMOTION_GATE
+
+        fetcher = DataFetcher()
+        processor = DataProcessor()
+        ticker_dfs = {}
+        total_samples = 0
+
+        for ticker in ticker_list:
+            click.echo(f"  Fetching {ticker}...", nl=False)
+            try:
+                df = fetcher.fetch_yfinance(ticker, interval, 365)
+                df = processor.clean_data(df)
+                df = TechnicalIndicators.add_all_indicators(df)
+                ticker_dfs[ticker] = df
+                samples = len(df.dropna())
+                total_samples += samples
+                click.echo(f" {samples} bars")
+            except Exception as e:
+                click.echo(f" SKIP ({e})")
+
+        if not ticker_dfs:
+            click.echo("\n  ❌ No data fetched for any ticker.")
+            return
+
+        click.echo(f"\n  Total pooled bars: {total_samples}")
+        click.echo(f"  Training cross-sectional model...")
+
+        trader = XGBoostTrader()
+        X_train, y_train, X_test, y_test = trader.prepare_cross_sectional(
+            ticker_dfs, use_triple_barrier=use_triple
+        )
+
+        click.echo(f"  Train: {len(X_train)} samples | Test: {len(X_test)} samples")
+        click.echo(f"  Features: {len(trader.feature_names)}")
+
+        trader.train(X_train, y_train)
+        metrics = trader.evaluate(X_test, y_test)
+
+        click.echo(f"\n  Test Results:")
+        click.echo(f"  Accuracy:  {metrics['accuracy']:.4f}")
+        click.echo(f"  Precision: {metrics['precision']:.4f}")
+        click.echo(f"  Recall:    {metrics['recall']:.4f}")
+
+        importance = trader.get_feature_importance()
+        click.echo(f"\n  Top 5 Features:")
+        for _, row in importance.head(5).iterrows():
+            click.echo(f"    {row['feature']:<20} {row['percentage']:>6.1f}%")
+
+        model_dir = trader.save('all_tickers', interval)
+        click.echo(f"\n  ✅ Cross-sectional model saved to: {model_dir}")
+        click.echo(f"  Use with: python3 main.py pipeline  (XGBoost is now default)")
+
+    except Exception as e:
+        click.echo(f"\n❌ Error: {str(e)}", err=True)
+        logger.error(f"Cross-sectional training error: {e}", exc_info=True)
+        sys.exit(1)
+
 # ============================================
 # COMMAND: LIST STRATEGIES
 # ============================================
