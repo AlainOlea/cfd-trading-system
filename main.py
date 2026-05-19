@@ -346,7 +346,7 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
         click.echo(f"\n   Training...")
         trainer.train(hybrid, X_train, y_train, epochs=epochs, batch_size=batch_size)
 
-        # 6. Evaluate
+        # 6. Evaluate (classification metrics)
         metrics = trainer.evaluate(hybrid, X_test, y_test)
         click.echo(f"\n   Test Results:")
         click.echo(f"   Accuracy:  {metrics['accuracy']:.4f}")
@@ -354,8 +354,28 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
         click.echo(f"   Recall:    {metrics['recall']:.4f}")
         click.echo(f"   Loss:      {metrics['loss']:.4f}")
 
-        # 7. Save model
-        model_dir = trainer.save_model(hybrid, ticker, interval)
+        # 6b. OOS financial backtest — the only honest measure of edge
+        try:
+            oos = trainer.backtest_predictions(hybrid, X_test, ticker=ticker, interval=interval)
+            metrics.update(oos)
+            click.echo(f"\n   OOS Financial Backtest (with CFD costs):")
+            click.echo(f"   Sharpe:        {oos['oos_sharpe']:>8.2f}")
+            click.echo(f"   Total Return:  {oos['oos_total_return_pct']:>8.2f}%")
+            click.echo(f"   Max Drawdown:  {oos['oos_max_drawdown_pct']:>8.2f}%")
+            click.echo(f"   Profit Factor: {oos['oos_profit_factor']:>8.2f}")
+            click.echo(f"   Win Rate:      {oos['oos_win_rate_pct']:>8.2f}%")
+            click.echo(f"   Trades:        {oos['oos_n_trades']:>8d}")
+        except Exception as e:
+            click.echo(f"\n   ⚠️  OOS backtest skipped: {e}")
+            logger.warning(f"OOS backtest failed for {ticker}: {e}")
+
+        # 7. Save model (promotion gate applied inside save_model)
+        model_dir = trainer.save_model(hybrid, ticker, interval, metrics=metrics)
+        promoted, reasons = trainer.evaluate_promotion(metrics)
+        if promoted:
+            click.echo(f"\n   ✅ Model PROMOTED (passes OOS gate)")
+        else:
+            click.echo(f"\n   ⚠️  Model NOT promoted: {reasons}")
         click.echo(f"\n   Model saved to: {model_dir}")
         logger.info(f"LSTM training completed for {ticker}: acc={metrics['accuracy']:.4f}")
 
@@ -686,6 +706,220 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
         click.echo(f"\n  Error running pipeline: {str(e)}", err=True)
         logger.error(f"Error running pipeline: {e}", exc_info=True)
         sys.exit(1)
+
+
+@cli.command('paper-trade')
+@click.option('--category', default=None, help='Filter by category (indices, commodities, stocks, crypto)')
+@click.option('--ticker', default=None, help='Single ticker (e.g. SPY, GLD)')
+@click.option('--no-ml', is_flag=True, help='Disable ML predictions')
+@click.option('--no-ensemble', is_flag=True, help='Disable ensemble voting')
+@click.option('--no-news', is_flag=True, help='Disable news sentiment')
+@click.option('--no-telegram', is_flag=True, help='Disable Telegram notifications')
+@click.option('--min-confluence', default=2, type=int, help='Min confluence stars to trade (1-5)')
+@click.option('--min-confidence', default=60.0, type=float, help='Min confidence % to trade')
+@click.option('--close-all', is_flag=True, help='Close all open paper positions first')
+@click.option('--dry-run', is_flag=True, help='Show what would be traded without executing')
+def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
+                min_confluence, min_confidence, close_all, dry_run):
+    """Run pipeline and auto-execute signals in Alpaca paper trading sandbox.
+
+    Connects to Alpaca Markets paper account ($100k virtual capital).
+    For each actionable BUY/SELL signal, places a bracket order (entry + SL + TP)
+    automatically. Skips tickers you already hold.
+
+    Requires ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
+    """
+    from signals.pipeline import UnifiedPipeline
+    from signals.alpaca_broker import AlpacaBroker, TradeResult
+    from signals.manager import SignalManager
+    from signals.generator import Signal
+    import time
+
+    use_ml = not no_ml
+    use_ensemble = not no_ensemble
+    use_news = not no_news
+    send_telegram = not no_telegram
+    manager = SignalManager()
+
+    click.echo(f"\n  PAPER TRADING MODE")
+    click.echo(f"  {'=' * 50}")
+    click.echo(f"  Min confluence:  {min_confluence}/5 stars")
+    click.echo(f"  Min confidence:  {min_confidence:.0f}%")
+    click.echo(f"  Dry run:         {'YES (no orders placed)' if dry_run else 'No (live paper trades)'}")
+    click.echo()
+
+    broker = AlpacaBroker()
+    if not broker.is_configured:
+        click.echo("  ALPACA_API_KEY not set in .env. Skipping paper trading.", err=True)
+        return
+
+    acct = broker.get_account_summary()
+    if acct:
+        click.echo(f"  Account: ${acct.get('cash', 0):,.0f} cash | "
+                   f"${acct.get('equity', 0):,.0f} equity | "
+                   f"{acct.get('status', 'unknown')}")
+
+    existing = broker.get_open_positions()
+    if existing:
+        click.echo(f"\n  Existing positions ({len(existing)}):")
+        for sym, pos in existing.items():
+            click.echo(f"    {sym}: {pos['qty']:.4f} sh | "
+                       f"entry ${pos['avg_entry']:.2f} | "
+                       f"P&L ${pos['unrealized_pl']:.2f} ({pos['unrealized_pl_pct']:.2f}%)")
+
+    if close_all and existing and not dry_run:
+        click.echo(f"\n  Closing {len(existing)} existing positions...")
+        results = broker.close_all()
+        for r in results:
+            status = "+" if r.placed else "x"
+            click.echo(f"    [{status}] {r.symbol}: {r.reason}")
+
+    click.echo(f"\n  Running signal pipeline...")
+    click.echo(f"  {'─' * 50}")
+
+    # Run pipeline
+    pipeline = UnifiedPipeline(
+        use_ml=use_ml, use_ensemble=use_ensemble,
+        use_news=use_news, send_telegram=send_telegram
+    )
+    results = pipeline.run_all(category=category, ticker_filter=ticker)
+    actionable = [r for r in results if r.is_actionable()]
+
+    click.echo(f"\n  Generated {len(results)} signals, {len(actionable)} actionable")
+    click.echo()
+
+    if not actionable:
+        click.echo("  No actionable signals. Nothing to trade.")
+        return
+
+    trades: list[TradeResult] = []
+    skipped = 0
+    dry_count = 0
+    for r in actionable:
+        # Apply quality filters
+        if r.confluence_score < min_confluence:
+            skipped += 1
+            continue
+        if r.final_confidence * 100 < min_confidence:
+            skipped += 1
+            continue
+
+        if dry_run:
+            dry_count += 1
+            shares = broker.calculate_shares(
+                r.technical_signal.entry_price,
+                r.technical_signal.stop_loss
+            )
+            click.echo(
+                f"  [DRY] {r.technical_signal.direction} {r.ticker} | "
+                f"entry=${r.technical_signal.entry_price:.2f} | "
+                f"SL=${r.technical_signal.stop_loss:.2f} | "
+                f"TP=${r.technical_signal.take_profit:.2f} | "
+                f"conf={r.final_confidence:.0%} | "
+                f"stars={r.confluence_score}/5 | "
+                f"shares={shares:.2f}"
+            )
+        else:
+            result = broker.place_signal(r.technical_signal)
+            trades.append(result)
+            status = "+" if result.placed else "x"
+            click.echo(
+                f"  [{status}] {r.technical_signal.direction} {result.symbol} | "
+                f"{result.qty:.2f} sh @ ~${result.entry_price:.2f} | "
+                f"SL=${result.stop_loss:.2f} TP=${result.take_profit:.2f} | "
+                f"conf={result.confidence:.0%} | "
+                f"{'OK' if result.placed else result.reason}"
+            )
+            manager.log_signal(r.technical_signal)
+
+    placed = sum(1 for t in trades if t.placed)
+    failed = sum(1 for t in trades if not t.placed)
+    bid = 'DRY RUN' if dry_run else 'PAPER'
+    if dry_run:
+        click.echo(f"\n  DRY RUN: {dry_count} signals would be traded, {skipped} skipped (quality filter)")
+    else:
+        click.echo(f"\n  {bid} TRADING COMPLETE: {placed} placed, {failed} failed, {skipped} skipped (quality filter)")
+
+    if placed > 0 and not dry_run:
+        click.echo(f"\n  View your trades: https://app.alpaca.markets/paper/dashboard/overview")
+
+
+@cli.command('paper-status')
+def paper_status():
+    """Check Alpaca paper trading account status and open positions."""
+    from signals.alpaca_broker import AlpacaBroker
+
+    broker = AlpacaBroker()
+    if not broker.is_configured:
+        click.echo("ALPACA_API_KEY not set in .env")
+        return
+
+    click.echo("\n  ALPACA PAPER TRADING ACCOUNT")
+    click.echo(f"  {'=' * 50}")
+
+    acct = broker.get_account_summary()
+    if not acct:
+        click.echo("  Failed to connect to Alpaca")
+        return
+
+    pnl = acct['equity'] - 100000
+    pnl_pct = (pnl / 100000) * 100
+    click.echo(f"  Cash:         ${acct['cash']:>12,.2f}")
+    click.echo(f"  Equity:       ${acct['equity']:>12,.2f}")
+    click.echo(f"  Buying power: ${acct['buying_power']:>12,.2f}")
+    click.echo(f"  P&L:          ${pnl:>+12,.2f} ({pnl_pct:+.2f}%)")
+    click.echo(f"  Status:       {acct['status']}")
+
+    positions = broker.get_open_positions()
+    click.echo(f"\n  Open Positions: {len(positions)}")
+    if positions:
+        click.echo(f"  {'Symbol':<8} {'Qty':>8} {'Entry':>10} {'Current':>10} {'P&L':>10} {'P&L%':>8}")
+        click.echo(f"  {'─'*8} {'─'*8} {'─'*10} {'─'*10} {'─'*10} {'─'*8}")
+        for sym, pos in positions.items():
+            click.echo(f"  {sym:<8} {pos['qty']:>8.4f} "
+                       f"${pos['avg_entry']:>9.2f} ${pos['current_price']:>9.2f} "
+                       f"${pos['unrealized_pl']:>+9.2f} {pos['unrealized_pl_pct']:>+7.2f}%")
+    else:
+        click.echo("  No open positions.")
+
+    # Show pending orders
+    try:
+        from dotenv import load_dotenv; load_dotenv()
+        import os
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(os.getenv('ALPACA_API_KEY'), os.getenv('ALPACA_SECRET_KEY'), paper=True)
+        orders = client.get_orders()
+        if orders:
+            click.echo(f"\n  Pending Orders: {len(orders)}")
+            click.echo(f"  {'Symbol':<8} {'Side':<6} {'Qty':>8} {'Type':>8} {'Status':>12}")
+            click.echo(f"  {'─'*8} {'─'*6} {'─'*8} {'─'*8} {'─'*12}")
+            for o in orders:
+                click.echo(f"  {o.symbol:<8} {str(o.side):<6} {o.qty:>8} {str(o.type):>8} {str(o.status):>12}")
+    except Exception:
+        pass
+
+
+@cli.command('paper-close')
+@click.argument('symbol', required=False)
+def paper_close(symbol):
+    """Close a paper position. Close all if no symbol specified."""
+    from signals.alpaca_broker import AlpacaBroker
+
+    broker = AlpacaBroker()
+    if not broker.is_configured:
+        click.echo("ALPACA_API_KEY not set in .env")
+        return
+
+    if symbol:
+        result = broker.close_position(symbol)
+        status = "+" if result.placed else "x"
+        click.echo(f"[{status}] {result.symbol}: {result.reason}")
+    else:
+        click.echo("Closing ALL paper positions...")
+        results = broker.close_all()
+        for r in results:
+            status = "+" if r.placed else "x"
+            click.echo(f"[{status}] {r.symbol}: {r.reason}")
 
 
 def _is_market_open(now: datetime, hours: dict) -> bool:

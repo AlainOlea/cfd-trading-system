@@ -69,15 +69,27 @@ class RSIBBStrategy(BaseStrategy):
         buy_mask = valid & rsi_oversold & touches_lower_bb
         df.loc[buy_mask, 'signal'] = 'BUY'
         df.loc[buy_mask, 'entry_price'] = df.loc[buy_mask, 'close']
-        df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - RSI_BB_SL_PERCENT)
-        df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'bb_middle']  # Target: middle BB
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, buy_mask, 'BUY')
+            if sl is not None:
+                df.loc[buy_mask, 'stop_loss'] = sl
+                df.loc[buy_mask, 'take_profit'] = tp
+        else:
+            df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - RSI_BB_SL_PERCENT)
+            df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'bb_middle']  # Target: middle BB
 
         # SELL: RSI overbought + touches upper BB (mean reversion down expected)
         sell_mask = valid & rsi_overbought & touches_upper_bb
         df.loc[sell_mask, 'signal'] = 'SELL'
         df.loc[sell_mask, 'entry_price'] = df.loc[sell_mask, 'close']
-        df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + RSI_BB_SL_PERCENT)
-        df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'bb_middle']  # Target: middle BB
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, sell_mask, 'SELL')
+            if sl is not None:
+                df.loc[sell_mask, 'stop_loss'] = sl
+                df.loc[sell_mask, 'take_profit'] = tp
+        else:
+            df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + RSI_BB_SL_PERCENT)
+            df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'bb_middle']  # Target: middle BB
 
         # Confidence: stronger when RSI is more extreme
         signal_mask = buy_mask | sell_mask

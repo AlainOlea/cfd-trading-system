@@ -446,6 +446,58 @@ Depends: Phase 2
 | 6 | 6 | Hybrid ML model (TF 2.20) | DONE |
 | 7 | 7 | Telegram bot | DONE |
 | 8 | 8 + 9 | Tests + final integration | DONE |
+| 10 | Audit | Auditoría y mejoras del sistema | DONE |
+
+---
+
+## Cambios – Sesión 10 (2026-03-29)
+
+### Fixes críticos aplicados
+
+**config/settings.py**
+- `SCALPING_INTERVAL`: corregido de `'1m'` a `'1h'` (1m requiere datos tick y estrategia distinta)
+
+**indicators/technical.py**
+- VWAP fallback para daily data: reemplazado cálculo cumsum acumulativo (incorrecto) por precio típico `(H+L+C)/3`. El VWAP real solo tiene sentido intraday.
+
+### Nuevas capacidades en estrategias
+
+**strategies/base.py** — 2 nuevos atributos de clase y 2 métodos estáticos:
+
+```python
+require_trend: bool = False   # Si True, usa _is_trending() para filtrar ranging markets
+use_atr_sl: bool = False      # Si True, usa _atr_sl_tp() para SL/TP dinámico
+
+_is_trending(df, threshold=20) -> pd.Series   # True donde ADX >= threshold
+_atr_sl_tp(df, mask, direction, sl_mult=1.5, tp_mult=3.0)  # SL/TP basados en ATR
+```
+
+**strategies/scalping/macd_vwap.py**
+- `require_trend = True` — solo genera señales cuando ADX ≥ 20
+- `use_atr_sl`: soportado (default False, retrocompatible)
+- `timeframe`: corregido de `'1m'` a `'1h'`
+
+**strategies/swing/ma_crossover.py**
+- `require_trend = True` — solo genera señales cuando ADX ≥ 20
+- `use_atr_sl`: soportado (default False, retrocompatible)
+
+**strategies/scalping/rsi_bb.py**
+- `use_atr_sl`: soportado (default False, retrocompatible)
+- `require_trend` queda en False (mean-reversion funciona mejor en ranging markets)
+
+### Uso del Market Regime Filter
+
+```python
+# Desactivar temporalmente (para backtesting sin filtro):
+strategy = MACDVWAPStrategy()
+strategy.require_trend = False
+
+# Activar ATR-based SL/TP:
+strategy = MACrossoverStrategy()
+strategy.use_atr_sl = True
+```
+
+### 47 tests — 100% pasando después de todos los cambios
 
 ---
 

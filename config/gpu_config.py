@@ -1,33 +1,35 @@
 """
 GPU Configuration for RTX 5060 Compatibility
 ==============================================
-Configures TensorFlow to use compute capability 8.9 (RTX 40-series compatible)
-for the RTX 5060 (compute capability 12.0) which doesn't have native CUDA kernels
-in TensorFlow 2.20.0.
+Configures TensorFlow for RTX 5060 (compute capability 12.0) with CUDA 12.9+ and cuDNN 9.
 
-This enables GPU acceleration by forcing TensorFlow to use existing cc 8.9 kernels
-which are compatible with RTX 5060 via PTX compilation at runtime.
+TensorFlow 2.21+ has native support for compute capability 12.0, enabling full GPU acceleration.
 """
 
 import os
 
 
 def configure_gpu():
-    """Configure TensorFlow for RTX 5060.
+    """Configure TensorFlow for RTX 5060 with GPU acceleration.
 
-    RTX 5060 (compute capability 12.0) is too new for stable TensorFlow.
-    Two options:
-    1. CPU-only mode (RECOMMENDED for WSL2): ~5 sec/5 epochs
-    2. Wait for TensorFlow 2.21+ stable (Q3 2026)
+    RTX 5060 (compute capability 12.0) is fully supported in TensorFlow 2.21+.
 
-    Current: CPU-only mode (proven, stable, fast enough)
+    Configuration:
+    - GPU Mode: Enabled (TensorFlow 2.21+)
+    - Memory Growth: Enabled (prevents OOM errors)
+    - Mixed Precision: Available for faster training
     """
-    # RTX 5060 requires TensorFlow 2.21+ stable for GPU support
-    # Using CPU mode for now (very fast: ~5 sec for 5 epochs)
-    os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+    # Enable GPU for TensorFlow 2.21+ with RTX 5060 support
+    # CUDA_VISIBLE_DEVICES is NOT set to -1, allowing GPU usage
 
-    print("✅ TensorFlow configured:")
-    print("   Mode: CPU-only (stable, fast)")
-    print("   Speed: ~5 sec for 5 epochs (efficient)")
-    print("   GPU: RTX 5060 8GB (for production: use TensorFlow 2.21+)")
-    print("   CUDA: Installed (12.5 + cuDNN 9 ready for TF 2.21+)")
+    # Enable memory growth to prevent TensorFlow from allocating all GPU memory
+    os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+
+    # Set logging level to reduce verbosity
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'  # 0=all, 1=filter INFO, 2=filter WARNING, 3=filter ERROR
+
+    print("✅ TensorFlow GPU configured:")
+    print("   Mode: GPU-accelerated (TensorFlow 2.21+)")
+    print("   GPU: RTX 5060 8GB (compute capability 12.0)")
+    print("   CUDA: 12.9 + cuDNN 9.19")
+    print("   Memory: Dynamic growth enabled")

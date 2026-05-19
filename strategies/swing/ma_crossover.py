@@ -22,6 +22,10 @@ from strategies.base import BaseStrategy
 class MACrossoverStrategy(BaseStrategy):
     """Moving Average Crossover strategy for swing trading (daily timeframe)."""
 
+    # Golden/death crosses in ranging markets produce unreliable signals.
+    # Require ADX >= 20 to confirm the trend before generating BUY/SELL.
+    require_trend: bool = True
+
     @property
     def name(self) -> str:
         return 'ma_crossover'
@@ -63,19 +67,36 @@ class MACrossoverStrategy(BaseStrategy):
         # Death Cross: fast was above slow, now below
         death_cross = (fast_prev >= slow_prev) & (df[fast_col] < df[slow_col])
 
+        # Market regime filter: only trade when trend is confirmed (ADX >= 20)
+        if self.require_trend:
+            trending = self._is_trending(df)
+            valid = valid & trending
+
         # BUY on Golden Cross
         buy_mask = valid & golden_cross
         df.loc[buy_mask, 'signal'] = 'BUY'
         df.loc[buy_mask, 'entry_price'] = df.loc[buy_mask, 'close']
-        df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - SWING_SL_PERCENT)
-        df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'close'] * (1 + SWING_TP_PERCENT)
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, buy_mask, 'BUY')
+            if sl is not None:
+                df.loc[buy_mask, 'stop_loss'] = sl
+                df.loc[buy_mask, 'take_profit'] = tp
+        else:
+            df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - SWING_SL_PERCENT)
+            df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'close'] * (1 + SWING_TP_PERCENT)
 
         # SELL on Death Cross
         sell_mask = valid & death_cross
         df.loc[sell_mask, 'signal'] = 'SELL'
         df.loc[sell_mask, 'entry_price'] = df.loc[sell_mask, 'close']
-        df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + SWING_SL_PERCENT)
-        df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'close'] * (1 - SWING_TP_PERCENT)
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, sell_mask, 'SELL')
+            if sl is not None:
+                df.loc[sell_mask, 'stop_loss'] = sl
+                df.loc[sell_mask, 'take_profit'] = tp
+        else:
+            df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + SWING_SL_PERCENT)
+            df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'close'] * (1 - SWING_TP_PERCENT)
 
         # Confidence: based on separation between fast and slow MA
         signal_mask = buy_mask | sell_mask

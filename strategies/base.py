@@ -10,9 +10,21 @@ import pandas as pd
 
 from config.settings import INITIAL_CAPITAL, RISK_PER_TRADE
 
+ADX_TREND_THRESHOLD = 20  # ADX above this value = trending market
+ATR_SL_MULTIPLIER = 1.5   # SL = entry ± 1.5 × ATR(14)
+ATR_TP_MULTIPLIER = 3.0   # TP = entry ± 3.0 × ATR(14)
+
 
 class BaseStrategy(ABC):
     """Abstract base class for trading strategies."""
+
+    # Subclasses can set this to True to suppress BUY/SELL signals in ranging markets.
+    require_trend: bool = False
+
+    # Set to True to use ATR-based dynamic SL/TP instead of fixed percentages.
+    # SL = entry ± ATR_SL_MULTIPLIER × ATR(14)
+    # TP = entry ± ATR_TP_MULTIPLIER × ATR(14)
+    use_atr_sl: bool = False
 
     @property
     @abstractmethod
@@ -65,6 +77,54 @@ class BaseStrategy(ABC):
             return 0.0
         risk_amount = capital * risk_per_trade
         return risk_amount / stop_loss_pct
+
+    @staticmethod
+    def _atr_sl_tp(
+        df: pd.DataFrame,
+        mask: pd.Series,
+        direction: str,
+        sl_mult: float = ATR_SL_MULTIPLIER,
+        tp_mult: float = ATR_TP_MULTIPLIER,
+    ) -> tuple[pd.Series | None, pd.Series | None]:
+        """Compute ATR-based stop-loss and take-profit for a set of rows.
+
+        Args:
+            df: DataFrame with 'atr' and 'close' columns.
+            mask: Boolean mask selecting the rows to compute SL/TP for.
+            direction: 'BUY' or 'SELL'.
+            sl_mult: ATR multiplier for stop-loss (default 1.5).
+            tp_mult: ATR multiplier for take-profit (default 3.0).
+
+        Returns:
+            Tuple (stop_loss_series, take_profit_series) aligned with df[mask].
+            Returns (None, None) if 'atr' column is missing.
+        """
+        if 'atr' not in df.columns:
+            return None, None
+        entry = df.loc[mask, 'close']
+        atr = df.loc[mask, 'atr']
+        if direction == 'BUY':
+            return entry - sl_mult * atr, entry + tp_mult * atr
+        return entry + sl_mult * atr, entry - tp_mult * atr
+
+    @staticmethod
+    def _is_trending(df: pd.DataFrame, threshold: float = ADX_TREND_THRESHOLD) -> pd.Series:
+        """Return a boolean Series: True where ADX confirms a trending market.
+
+        Strategies with require_trend=True use this to filter out signals
+        generated during ranging/choppy conditions (ADX < threshold).
+
+        Args:
+            df: DataFrame with an 'adx' column (added by TechnicalIndicators).
+            threshold: ADX value above which the market is considered trending.
+
+        Returns:
+            Boolean Series aligned with df.index. Falls back to all-True if
+            'adx' column is missing (safe degradation).
+        """
+        if 'adx' not in df.columns:
+            return pd.Series(True, index=df.index)
+        return df['adx'] >= threshold
 
     @staticmethod
     def _init_signal_columns(df: pd.DataFrame) -> pd.DataFrame:

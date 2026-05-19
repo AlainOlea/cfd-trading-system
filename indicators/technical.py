@@ -146,12 +146,12 @@ class TechnicalIndicators:
         if vwap is not None:
             df['vwap'] = vwap
         else:
-            # Fallback: cumulative typical price weighted by volume
+            # Fallback for daily data: use typical price (H+L+C)/3 as a proxy.
+            # True VWAP resets each session and requires intraday tick data;
+            # accumulating over multi-day history produces a meaningless number.
             typical_price = (df['high'] + df['low'] + df['close']) / 3
-            cum_vol = df['volume'].cumsum()
-            cum_tp_vol = (typical_price * df['volume']).cumsum()
-            df['vwap'] = cum_tp_vol / cum_vol.replace(0, float('nan'))
-            logger.debug("VWAP: using fallback calculation (daily data)")
+            df['vwap'] = typical_price
+            logger.debug("VWAP: using typical-price fallback (daily data — true VWAP requires intraday)")
         return df
 
     @staticmethod

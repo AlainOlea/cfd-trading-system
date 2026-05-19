@@ -31,17 +31,31 @@ class DataProcessor:
         """
         initial_len = len(df)
 
+        # Ensure columns are flat (no MultiIndex leftovers)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(-1)
+        df.columns = [str(c).lower().strip() for c in df.columns]
+
+        # Remove duplicate columns
+        df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
         # Remove duplicate index entries
         df = df[~df.index.duplicated(keep='first')]
 
         # Sort by datetime
         df.sort_index(inplace=True)
 
+        # Ensure index is timezone-naive UTC for consistent comparisons
+        if hasattr(df.index, 'tz') and df.index.tz is not None:
+            df.index = df.index.tz_convert('UTC').tz_localize(None)
+
         # Drop rows where all OHLCV values are NaN
         df.dropna(subset=REQUIRED_COLUMNS, how='all', inplace=True)
 
         # Forward-fill small gaps (e.g. missing single candle)
-        df[REQUIRED_COLUMNS] = df[REQUIRED_COLUMNS].ffill(limit=3)
+        for col in REQUIRED_COLUMNS:
+            if col in df.columns:
+                df[col] = df[col].ffill(limit=3)
 
         # Drop any remaining NaN rows
         df.dropna(subset=REQUIRED_COLUMNS, inplace=True)
@@ -88,7 +102,13 @@ class DataProcessor:
             raise ValueError(f"NaN values found: {cols_with_nan.to_dict()}")
 
         # Check OHLC logical consistency (high >= low)
-        invalid_bars = df[df['high'] < df['low']]
+        high_series = df['high']
+        low_series = df['low']
+        if isinstance(high_series, pd.DataFrame):
+            high_series = high_series.iloc[:, 0]
+        if isinstance(low_series, pd.DataFrame):
+            low_series = low_series.iloc[:, 0]
+        invalid_bars = df[high_series < low_series]
         if not invalid_bars.empty:
             raise ValueError(f"Found {len(invalid_bars)} bars where high < low")
 

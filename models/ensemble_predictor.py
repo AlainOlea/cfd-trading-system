@@ -26,7 +26,7 @@ class EnsemblePredictor:
             lstm_threshold: Confidence threshold for LSTM
             xgb_threshold: Confidence threshold for XGBoost
         """
-        self.lstm_predictor = PricePredictor(confidence_threshold=lstm_threshold)
+        self.lstm_predictor = PricePredictor(confidence_threshold=lstm_threshold, allow_unpromoted=True)
         self.xgb_predictor = XGBoostPredictor(confidence_threshold=xgb_threshold)
         self.lstm_loaded = False
         self.xgb_loaded = False

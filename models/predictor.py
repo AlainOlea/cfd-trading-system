@@ -20,8 +20,13 @@ logger = logging.getLogger(__name__)
 class PricePredictor:
     """Predicts price direction using a trained hybrid model."""
 
-    def __init__(self, confidence_threshold: float = SIGNAL_CONFIDENCE_HIGH):
+    def __init__(
+        self,
+        confidence_threshold: float = SIGNAL_CONFIDENCE_HIGH,
+        allow_unpromoted: bool = False,
+    ):
         self.confidence_threshold = confidence_threshold
+        self.allow_unpromoted = allow_unpromoted
         self._model = None
         self._scaler = None
         self._meta = None
@@ -29,12 +34,24 @@ class PricePredictor:
     def load(self, ticker: str, interval: str = '1d') -> None:
         """Load a trained model for a specific ticker.
 
-        Args:
-            ticker: Ticker symbol.
-            interval: Data interval.
+        Refuses to load models marked `promoted: False` in metadata
+        (failed the OOS financial gate) unless `allow_unpromoted=True`
+        was set on the predictor instance.
         """
-        self._model, self._scaler, self._meta = ModelTrainer.load_model(ticker, interval)
-        logger.info(f"Predictor loaded for {ticker} ({interval})")
+        model, scaler, meta = ModelTrainer.load_model(ticker, interval)
+
+        if not meta.get('promoted', True) and not self.allow_unpromoted:
+            reasons = meta.get('promotion_reasons', [])
+            raise RuntimeError(
+                f"Refusing to load unpromoted model {ticker} {interval}: "
+                f"{reasons}. Pass allow_unpromoted=True to override."
+            )
+
+        self._model, self._scaler, self._meta = model, scaler, meta
+        logger.info(
+            f"Predictor loaded for {ticker} ({interval}) "
+            f"[promoted={meta.get('promoted', 'unknown')}]"
+        )
 
     def predict_next(self, df: pd.DataFrame) -> dict[str, Any]:
         """Predict the next price direction from a DataFrame.

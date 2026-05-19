@@ -23,13 +23,17 @@ from strategies.base import BaseStrategy
 class MACDVWAPStrategy(BaseStrategy):
     """MACD + VWAP crossover strategy for scalping (1-5 min timeframes)."""
 
+    # Suppress signals in ranging markets (ADX < 20) — MACD generates many
+    # false positives when price is not trending.
+    require_trend: bool = True
+
     @property
     def name(self) -> str:
         return 'macd_vwap'
 
     @property
     def timeframe(self) -> str:
-        return '1m'
+        return '1h'
 
     @property
     def description(self) -> str:
@@ -67,19 +71,36 @@ class MACDVWAPStrategy(BaseStrategy):
         price_above_vwap = df['close'] > df['vwap']
         price_below_vwap = df['close'] < df['vwap']
 
+        # Market regime filter: skip signals in ranging/choppy markets
+        if self.require_trend:
+            trending = self._is_trending(df)
+            valid = valid & trending
+
         # BUY: bullish MACD cross + price above VWAP
         buy_mask = valid & bullish_cross & price_above_vwap
         df.loc[buy_mask, 'signal'] = 'BUY'
         df.loc[buy_mask, 'entry_price'] = df.loc[buy_mask, 'close']
-        df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - SCALPING_SL_PERCENT)
-        df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'close'] * (1 + SCALPING_TP_PERCENT)
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, buy_mask, 'BUY')
+            if sl is not None:
+                df.loc[buy_mask, 'stop_loss'] = sl
+                df.loc[buy_mask, 'take_profit'] = tp
+        else:
+            df.loc[buy_mask, 'stop_loss'] = df.loc[buy_mask, 'close'] * (1 - SCALPING_SL_PERCENT)
+            df.loc[buy_mask, 'take_profit'] = df.loc[buy_mask, 'close'] * (1 + SCALPING_TP_PERCENT)
 
         # SELL: bearish MACD cross + price below VWAP
         sell_mask = valid & bearish_cross & price_below_vwap
         df.loc[sell_mask, 'signal'] = 'SELL'
         df.loc[sell_mask, 'entry_price'] = df.loc[sell_mask, 'close']
-        df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + SCALPING_SL_PERCENT)
-        df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'close'] * (1 - SCALPING_TP_PERCENT)
+        if self.use_atr_sl:
+            sl, tp = self._atr_sl_tp(df, sell_mask, 'SELL')
+            if sl is not None:
+                df.loc[sell_mask, 'stop_loss'] = sl
+                df.loc[sell_mask, 'take_profit'] = tp
+        else:
+            df.loc[sell_mask, 'stop_loss'] = df.loc[sell_mask, 'close'] * (1 + SCALPING_SL_PERCENT)
+            df.loc[sell_mask, 'take_profit'] = df.loc[sell_mask, 'close'] * (1 - SCALPING_TP_PERCENT)
 
         # Confidence: higher when MACD histogram is strong
         histogram_strength = df['macd'] - df['macd_signal']

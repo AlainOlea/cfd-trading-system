@@ -57,7 +57,7 @@ DEFAULT_TICKERS = ['SPY', 'QQQ', 'GLD', 'BTC-USD', 'ETH-USD', 'AAPL', 'NVDA']
 # ============================================
 
 # Data intervals for different strategies
-SCALPING_INTERVAL = '1m'   # 1-minute for scalping
+SCALPING_INTERVAL = '1h'   # Hourly for scalping (1m requires tick data and different strategy)
 SWING_INTERVAL = '1d'      # Daily for swing trading
 HOURLY_INTERVAL = '1h'     # Hourly for position trading
 
@@ -75,8 +75,21 @@ SIGNAL_LOOKBACK_BARS = 500    # Number of bars to load for signal generation
 
 INITIAL_CAPITAL = 10000        # Starting capital in USD
 RISK_PER_TRADE = 0.02          # 2% risk per trade
-COMMISSION = 0.001             # 0.1% commission per trade (adjust for broker)
-SLIPPAGE = 0.0005              # 0.05% slippage
+
+# CFD cost model (Plus500 spread-based, not commission-based)
+# CFDs have no explicit commission — cost is embedded in the bid/ask spread.
+# VectorBT applies fees at entry AND exit, so we use half-spread per leg
+# (entry cost = spread/2, exit cost = spread/2 → round-trip = full spread).
+CFD_SPREADS = {
+    'indices':     0.0001,   # SPY, QQQ, IWM — very liquid, ~0.01% spread
+    'stocks':      0.0003,   # AAPL, MSFT, NVDA — ~0.03% spread
+    'crypto':      0.0040,   # BTC-USD, ETH-USD — ~0.4% spread on Plus500
+    'commodities': 0.0002,   # GLD, USO — ~0.02% spread
+    'default':     0.0002,
+}
+CFD_OVERNIGHT_RATE = 0.0001    # ~0.01% per night (based on ~3.65%/yr SOFR proxy)
+COMMISSION = CFD_SPREADS['default'] / 2  # Half-spread per leg (round-trip = full spread)
+SLIPPAGE = 0.0                 # Spread already captures execution cost for CFDs
 
 # ============================================
 # STRATEGY PARAMETERS
@@ -171,12 +184,35 @@ TRANSFORMER_CONFIG = {
 NORMALIZE_FEATURES = True
 SCALER_TYPE = 'minmax'  # 'minmax' or 'standard'
 
+# Pipeline version stamped into metadata.json. Bump on breaking changes
+# (label scheme, feature set, scaler semantics) so predictor can reject
+# incompatible legacy artefacts.
+PIPELINE_VERSION = '2.0'
+
+# Thresholds applied to model sigmoid output when generating BUY/SELL
+# signals for the OOS financial backtest. Asymmetric band leaves a HOLD
+# zone in the middle to avoid trading low-conviction predictions.
+ML_SIGNAL_THRESHOLDS = {
+    'buy_above': 0.55,
+    'sell_below': 0.45,
+}
+
+# Minimum OOS metrics required to mark a trained model as `promoted: True`
+# in metadata.json. Predictor refuses to load non-promoted models unless
+# explicitly overridden.
+ML_PROMOTION_GATE = {
+    'min_sharpe': 0.5,
+    'min_profit_factor': 1.1,
+    'min_trades': 20,
+    'max_drawdown_pct': -30.0,  # vbt reports as negative percentage
+}
+
 # ============================================
 # DATA SOURCES
 # ============================================
 
 # Yahoo Finance settings
-YFINANCE_AUTO_ADJUST = False  # Don't auto-adjust for splits/dividends
+YFINANCE_AUTO_ADJUST = True   # Adjust prices for splits and dividends (avoids false jumps in history)
 YFINANCE_PREPOST = False      # Don't include pre/post market data
 YFINANCE_THREADS = 4           # Number of threads for parallel downloads
 

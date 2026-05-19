@@ -16,6 +16,8 @@ Usage:
 """
 
 import logging
+import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -118,7 +120,7 @@ class UnifiedPipeline:
         self.use_news = use_news
         self.send_telegram = send_telegram
         self.max_workers = max_workers
-
+        self._fetch_lock = threading.Lock()
         self.fetcher = DataFetcher()
         self.processor = DataProcessor()
         self.generator = SignalGenerator()
@@ -142,7 +144,7 @@ class UnifiedPipeline:
                 result = self._run_single(config, interval, data_cache)
                 results.append(result)
             except Exception as e:
-                logger.error(f"Pipeline error for {config.ticker} {interval}: {e}")
+                logger.error(f"Pipeline error for {config.ticker} {interval}: {e}\n{traceback.format_exc()}")
 
         # Compute multi-timeframe confluence across all intervals
         if len(results) > 1:
@@ -191,7 +193,7 @@ class UnifiedPipeline:
                     results = future.result()
                     all_results.extend(results)
                 except Exception as e:
-                    logger.error(f"Pipeline failed for {config.ticker}: {e}")
+                    logger.error(f"Pipeline failed for {config.ticker}: {e}\n{traceback.format_exc()}")
 
         return all_results
 
@@ -218,7 +220,8 @@ class UnifiedPipeline:
             data_cache[cache_key] = df
         df = data_cache[cache_key]
 
-        # 2. Apply strategies directly on the fresh DataFrame (no re-fetch)
+        # 2. Apply strategies and search last N bars for actionable signals
+        lookback = 5
         best_signal = None
         for strategy_name in config.strategies:
             try:
@@ -228,18 +231,35 @@ class UnifiedPipeline:
 
                 strategy = STRATEGY_MAP[strategy_name]()
                 signals_df = strategy.generate_signals(df.copy())
-                latest = signals_df.iloc[-1]
 
-                signal = Signal(
-                    strategy=strategy_name,
-                    ticker=config.ticker,
-                    interval=interval,
-                    direction=latest['signal'],
-                    entry_price=float(latest['close']),
-                    stop_loss=float(latest['stop_loss']),
-                    take_profit=float(latest['take_profit']),
-                    confidence=float(latest['confidence']),
-                )
+                # Search last N bars for a BUY/SELL signal with valid SL/TP
+                recent = signals_df.tail(lookback)
+                actionable = recent[recent['signal'].isin(['BUY', 'SELL'])]
+
+                if not actionable.empty:
+                    last = actionable.iloc[-1]
+                    signal = Signal(
+                        strategy=strategy_name,
+                        ticker=config.ticker,
+                        interval=interval,
+                        direction=last['signal'],
+                        entry_price=float(last['close']),
+                        stop_loss=float(last['stop_loss']),
+                        take_profit=float(last['take_profit']),
+                        confidence=float(last['confidence']),
+                    )
+                else:
+                    last_row = signals_df.iloc[-1]
+                    signal = Signal(
+                        strategy=strategy_name,
+                        ticker=config.ticker,
+                        interval=interval,
+                        direction='HOLD',
+                        entry_price=float(last_row['close']),
+                        stop_loss=0.0,
+                        take_profit=0.0,
+                        confidence=0.0,
+                    )
 
                 # Pick the most actionable signal (BUY/SELL over HOLD, highest confidence)
                 if best_signal is None:
@@ -290,11 +310,13 @@ class UnifiedPipeline:
         """Fetch FRESH data for a ticker+interval from Yahoo Finance.
 
         Always fetches live data to ensure signals are based on current prices.
+        Thread-safe: serializes yfinance calls with a lock.
         Saves to CSV as backup after fetching.
         """
         days = self.generator._estimate_days(interval)
         logger.info(f"Fetching fresh data for {ticker} {interval} ({days}d)")
-        df = self.fetcher.fetch_yfinance(ticker, interval, days)
+        with self._fetch_lock:
+            df = self.fetcher.fetch_yfinance(ticker, interval, days)
         df = self.processor.clean_data(df)
         self.processor.validate_data(df)
         self.fetcher.save_to_csv(df, ticker, interval)
@@ -305,7 +327,7 @@ class UnifiedPipeline:
         """Apply single ML model prediction."""
         try:
             from models.predictor import PricePredictor
-            predictor = PricePredictor(confidence_threshold=0.55)
+            predictor = PricePredictor(confidence_threshold=0.55, allow_unpromoted=True)
             predictor.load(ticker, interval)
             return predictor.predict_next(df)
         except (ImportError, FileNotFoundError, Exception) as e:

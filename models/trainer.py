@@ -12,7 +12,9 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 from config.settings import (
-    ML_CONFIG, MODELS_SAVED_DIR, NORMALIZE_FEATURES, SCALER_TYPE,
+    COMMISSION, INITIAL_CAPITAL, ML_CONFIG, ML_PROMOTION_GATE,
+    ML_SIGNAL_THRESHOLDS, MODELS_SAVED_DIR, NORMALIZE_FEATURES,
+    PIPELINE_VERSION, SCALER_TYPE, SLIPPAGE,
 )
 from models.hybrid_model import HybridLSTMTransformer
 
@@ -40,6 +42,11 @@ class ModelTrainer:
         self.test_split = test_split
         self.early_stopping_patience = early_stopping_patience
         self.scaler = MinMaxScaler() if SCALER_TYPE == 'minmax' else StandardScaler()
+
+        # Populated by prepare_data() so the OOS financial backtest can
+        # reconstruct an entries/exits series aligned to real bar prices.
+        self._test_close: pd.Series | None = None
+        self._test_index: pd.DatetimeIndex | None = None
 
         # Configure GPU memory growth (prevents OOM errors)
         try:
@@ -90,24 +97,49 @@ class ModelTrainer:
         labels = (close_values[1:] > close_values[:-1]).astype(np.float32)
         data = data.iloc[:-1]  # Drop last row (no label)
 
-        # Normalize features
         values = data.values.astype(np.float32)
+
+        # Split raw arrays BEFORE normalizing (chronological, no shuffle)
+        # This prevents scaler leakage: scaler must not see future (test) data
+        raw_split = int(len(values) * (1 - self.test_split))
+        train_raw = values[:raw_split]
+        test_raw  = values[raw_split:]
+        train_labels = labels[:raw_split]
+        test_labels  = labels[raw_split:]
+
+        # Fit scaler on training portion only, then transform both
         if NORMALIZE_FEATURES:
-            values = self.scaler.fit_transform(values)
+            train_norm = self.scaler.fit_transform(train_raw)
+            test_norm  = self.scaler.transform(test_raw)
+        else:
+            train_norm = train_raw
+            test_norm  = test_raw
 
-        # Create sliding windows
-        X, y = [], []
-        for i in range(len(values) - self.lookback_window):
-            X.append(values[i:i + self.lookback_window])
-            y.append(labels[i + self.lookback_window])
+        # Create sliding windows from each split independently
+        X_train, y_train = [], []
+        for i in range(len(train_norm) - self.lookback_window):
+            X_train.append(train_norm[i:i + self.lookback_window])
+            y_train.append(train_labels[i + self.lookback_window])
 
-        X = np.array(X)
-        y = np.array(y)
+        X_test, y_test = [], []
+        for i in range(len(test_norm) - self.lookback_window):
+            X_test.append(test_norm[i:i + self.lookback_window])
+            y_test.append(test_labels[i + self.lookback_window])
 
-        # Train/test split (chronological, no shuffle)
-        split_idx = int(len(X) * (1 - self.test_split))
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_train, y_test = y[:split_idx], y[split_idx:]
+        X_train = np.array(X_train)
+        y_train = np.array(y_train)
+        X_test  = np.array(X_test)
+        y_test  = np.array(y_test)
+
+        # Store the close price + timestamp aligned with each y_test entry.
+        # y_test[i] corresponds to the bar at offset (raw_split + lookback + i)
+        # in the cleaned DataFrame, so we slice the original close series at
+        # the same positions for use by backtest_predictions().
+        if 'close' in available:
+            test_data = data.iloc[raw_split:]
+            close_aligned = test_data['close'].iloc[self.lookback_window:]
+            self._test_close = close_aligned.iloc[:len(y_test)]
+            self._test_index = self._test_close.index
 
         logger.info(
             f"Data prepared: {len(X_train)} train, {len(X_test)} test samples. "
@@ -235,99 +267,99 @@ class ModelTrainer:
         data = df[available].copy()
         data = data.dropna()
 
-        # Create labels
+        # Create labels (one per bar, label[i] = up/down for bar i+1)
         close_col = 'close' if 'close' in available else available[0]
         close_values = data[close_col].values
         labels = (close_values[1:] > close_values[:-1]).astype(np.float32)
         data = data.iloc[:-1]
 
-        # Normalize features (fit on full dataset for consistency)
-        values = data.values.astype(np.float32)
-        if NORMALIZE_FEATURES:
-            values = self.scaler.fit_transform(values)
+        # Keep raw (un-normalized) bar values. The scaler is fit per fold
+        # below so test-set statistics never leak into training. An embargo
+        # of `lookback_window` bars is inserted between train and test to
+        # prevent window-overlap leakage (a test window starting at
+        # train_end would otherwise include bars seen during training).
+        raw_values = data.values.astype(np.float32)
+        embargo = self.lookback_window
 
-        # Create all sliding windows
-        X_all, y_all = [], []
-        for i in range(len(values) - self.lookback_window):
-            X_all.append(values[i:i + self.lookback_window])
-            y_all.append(labels[i + self.lookback_window])
+        n_bars = len(raw_values)
+        # Convert window-counts to bar-counts (each window consumes
+        # `lookback_window` bars of history before producing one sample).
+        train_bars = train_window + self.lookback_window
+        test_bars = test_window + self.lookback_window
 
-        X_all = np.array(X_all)
-        y_all = np.array(y_all)
+        logger.info(
+            f"Total bars: {n_bars}, lookback: {self.lookback_window}, "
+            f"embargo: {embargo}, method: {method}"
+        )
 
-        logger.info(f"Total windows created: {len(X_all)}")
-        logger.info(f"Using walk-forward method: {method}")
-
-        # Create folds
-        folds = []
+        # Per-fold scalers (one fitted scaler per fold, train-only)
+        self._fold_scalers: list = []
+        folds: list[dict] = []
         fold_idx = 0
+        pos = 0
 
-        if method == 'anchored':
-            # Expanding window: train grows, test moves forward
-            pos = 0
-            while pos + train_window + test_window <= len(X_all):
-                train_end = pos + train_window
-                test_end = train_end + test_window
+        while True:
+            if method == 'anchored':
+                train_start_bar = 0
+                train_end_bar = pos + train_bars
+            elif method == 'rolling':
+                train_start_bar = pos
+                train_end_bar = pos + train_bars
+            else:
+                raise ValueError(f"Unknown method: {method}. Use 'anchored' or 'rolling'")
 
-                X_tr = X_all[:train_end]
-                y_tr = y_all[:train_end]
-                X_te = X_all[train_end:test_end]
-                y_te = y_all[train_end:test_end]
+            test_start_bar = train_end_bar + embargo
+            test_end_bar = test_start_bar + test_bars
 
-                # Map back to dates
-                train_date_start = data.index[0]
-                train_date_end = data.index[train_end]
-                test_date_start = data.index[train_end]
-                test_date_end = data.index[min(test_end, len(data) - 1)]
+            if test_end_bar > n_bars:
+                break
 
-                folds.append({
-                    'fold': fold_idx,
-                    'X_train': X_tr,
-                    'y_train': y_tr,
-                    'X_test': X_te,
-                    'y_test': y_te,
-                    'train_dates': (train_date_start, train_date_end),
-                    'test_dates': (test_date_start, test_date_end),
-                })
+            train_bars_slice = raw_values[train_start_bar:train_end_bar]
+            test_bars_slice = raw_values[test_start_bar:test_end_bar]
 
-                pos += step_size
-                fold_idx += 1
+            # Fit scaler on TRAIN ONLY. This is the leakage fix.
+            if NORMALIZE_FEATURES:
+                fold_scaler = MinMaxScaler() if SCALER_TYPE == 'minmax' else StandardScaler()
+                train_norm = fold_scaler.fit_transform(train_bars_slice)
+                test_norm = fold_scaler.transform(test_bars_slice)
+            else:
+                fold_scaler = None
+                train_norm = train_bars_slice
+                test_norm = test_bars_slice
 
-        elif method == 'rolling':
-            # Rolling window: train size fixed, both roll forward
-            pos = 0
-            while pos + train_window + test_window <= len(X_all):
-                train_start = pos
-                train_end = pos + train_window
-                test_end = train_end + test_window
+            # Build windows from each normalized slice independently
+            X_tr, y_tr = [], []
+            for i in range(len(train_norm) - self.lookback_window):
+                X_tr.append(train_norm[i:i + self.lookback_window])
+                y_tr.append(labels[train_start_bar + i + self.lookback_window])
 
-                X_tr = X_all[train_start:train_end]
-                y_tr = y_all[train_start:train_end]
-                X_te = X_all[train_end:test_end]
-                y_te = y_all[train_end:test_end]
+            X_te, y_te = [], []
+            for i in range(len(test_norm) - self.lookback_window):
+                X_te.append(test_norm[i:i + self.lookback_window])
+                y_te.append(labels[test_start_bar + i + self.lookback_window])
 
-                train_date_start = data.index[train_start]
-                train_date_end = data.index[train_end - 1]
-                test_date_start = data.index[train_end]
-                test_date_end = data.index[min(test_end - 1, len(data) - 1)]
+            self._fold_scalers.append(fold_scaler)
+            folds.append({
+                'fold': fold_idx,
+                'X_train': np.array(X_tr),
+                'y_train': np.array(y_tr),
+                'X_test': np.array(X_te),
+                'y_test': np.array(y_te),
+                'train_dates': (data.index[train_start_bar], data.index[train_end_bar - 1]),
+                'test_dates': (data.index[test_start_bar], data.index[test_end_bar - 1]),
+                'scaler': fold_scaler,
+            })
 
-                folds.append({
-                    'fold': fold_idx,
-                    'X_train': X_tr,
-                    'y_train': y_tr,
-                    'X_test': X_te,
-                    'y_test': y_te,
-                    'train_dates': (train_date_start, train_date_end),
-                    'test_dates': (test_date_start, test_date_end),
-                })
+            pos += step_size
+            fold_idx += 1
 
-                pos += step_size
-                fold_idx += 1
+        # Promote the most recent fold's scaler to be the production scaler
+        # (used by save_model), since it was fit on the largest/most-recent
+        # train window in anchored mode.
+        if self._fold_scalers and self._fold_scalers[-1] is not None:
+            self.scaler = self._fold_scalers[-1]
 
-        else:
-            raise ValueError(f"Unknown method: {method}. Use 'anchored' or 'rolling'")
-
-        logger.info(f"Created {len(folds)} walk-forward folds")
+        logger.info(f"Created {len(folds)} walk-forward folds (per-fold scalers, embargo={embargo})")
         return folds
 
     def train_walk_forward(
@@ -507,23 +539,157 @@ class ModelTrainer:
         )
         return metrics
 
+    def backtest_predictions(
+        self,
+        model: HybridLSTMTransformer,
+        X_test: np.ndarray,
+        ticker: str = '',
+        interval: str = '1d',
+        thresholds: dict | None = None,
+        commission: float | None = None,
+        slippage: float | None = None,
+        initial_capital: float | None = None,
+    ) -> dict:
+        """Run an out-of-sample financial backtest of the model's predictions.
+
+        Translates sigmoid output into BUY/SELL/HOLD signals using a
+        configurable threshold band, then runs vectorbt over the test-set
+        bars with realistic CFD costs. This is the only honest measure of
+        whether the model has trading edge — accuracy on next-bar
+        classification does not imply profitability after spreads.
+
+        Requires `prepare_data()` to have been called previously so that
+        `self._test_close` is populated.
+
+        Returns a dict prefixed with `oos_` to merge cleanly into metadata.
+        """
+        import vectorbt as vbt
+
+        if self._test_close is None or len(self._test_close) == 0:
+            raise RuntimeError(
+                "No test prices available. Call prepare_data() before "
+                "backtest_predictions()."
+            )
+
+        thresholds = thresholds or ML_SIGNAL_THRESHOLDS
+        commission = commission if commission is not None else COMMISSION
+        slippage = slippage if slippage is not None else SLIPPAGE
+        initial_capital = initial_capital or INITIAL_CAPITAL
+
+        probs = model.model.predict(X_test, verbose=0).flatten()
+        if len(probs) != len(self._test_close):
+            # Defensive: align to the shorter series in case of off-by-one
+            n = min(len(probs), len(self._test_close))
+            probs = probs[:n]
+            close = self._test_close.iloc[:n]
+            index = self._test_index[:n]
+        else:
+            close = self._test_close
+            index = self._test_index
+
+        entries = pd.Series(probs > thresholds['buy_above'], index=index)
+        exits = pd.Series(probs < thresholds['sell_below'], index=index)
+
+        portfolio = vbt.Portfolio.from_signals(
+            close=close,
+            entries=entries,
+            exits=exits,
+            init_cash=initial_capital,
+            fees=commission,
+            slippage=slippage,
+            freq=self._interval_to_freq(interval),
+        )
+
+        stats = portfolio.stats()
+        n_trades = int(stats.get('Total Trades', 0))
+
+        def _safe(v, default=0.0):
+            try:
+                f = float(v)
+                if np.isnan(f) or np.isinf(f):
+                    return default
+                return f
+            except (TypeError, ValueError):
+                return default
+
+        oos = {
+            'oos_sharpe': _safe(stats.get('Sharpe Ratio')),
+            'oos_sortino': _safe(stats.get('Sortino Ratio')),
+            'oos_max_drawdown_pct': _safe(stats.get('Max Drawdown [%]')),
+            'oos_total_return_pct': _safe(stats.get('Total Return [%]')),
+            'oos_win_rate_pct': _safe(stats.get('Win Rate [%]')),
+            'oos_profit_factor': _safe(stats.get('Profit Factor')),
+            'oos_expectancy': _safe(stats.get('Expectancy')),
+            'oos_n_trades': n_trades,
+            'oos_thresholds': dict(thresholds),
+            'oos_commission': commission,
+            'oos_slippage': slippage,
+        }
+
+        logger.info(
+            f"OOS backtest {ticker} {interval}: "
+            f"sharpe={oos['oos_sharpe']:.2f} "
+            f"return={oos['oos_total_return_pct']:.2f}% "
+            f"maxDD={oos['oos_max_drawdown_pct']:.2f}% "
+            f"PF={oos['oos_profit_factor']:.2f} "
+            f"trades={oos['oos_n_trades']}"
+        )
+        return oos
+
+    @staticmethod
+    def _interval_to_freq(interval: str) -> str | None:
+        freq_map = {'1m': '1min', '5m': '5min', '15m': '15min', '1h': '1h', '1d': '1D'}
+        return freq_map.get(interval)
+
+    @staticmethod
+    def evaluate_promotion(metrics: dict) -> tuple[bool, list[str]]:
+        """Apply ML_PROMOTION_GATE to OOS metrics.
+
+        Returns (promoted, reasons). `reasons` is empty when promoted.
+        """
+        gate = ML_PROMOTION_GATE
+        reasons: list[str] = []
+        if metrics.get('oos_sharpe', 0.0) < gate['min_sharpe']:
+            reasons.append(
+                f"sharpe {metrics.get('oos_sharpe', 0.0):.2f} < {gate['min_sharpe']}"
+            )
+        if metrics.get('oos_profit_factor', 0.0) < gate['min_profit_factor']:
+            reasons.append(
+                f"profit_factor {metrics.get('oos_profit_factor', 0.0):.2f} "
+                f"< {gate['min_profit_factor']}"
+            )
+        if metrics.get('oos_n_trades', 0) < gate['min_trades']:
+            reasons.append(
+                f"n_trades {metrics.get('oos_n_trades', 0)} < {gate['min_trades']}"
+            )
+        if metrics.get('oos_max_drawdown_pct', 0.0) < gate['max_drawdown_pct']:
+            reasons.append(
+                f"max_drawdown {metrics.get('oos_max_drawdown_pct', 0.0):.2f}% "
+                f"worse than {gate['max_drawdown_pct']}%"
+            )
+        return (len(reasons) == 0, reasons)
+
     def save_model(
         self,
         model: HybridLSTMTransformer,
         ticker: str,
         interval: str = '1d',
+        metrics: dict | None = None,
     ) -> Path:
-        """Save model weights and scaler to disk.
+        """Save model weights, scaler, and metadata to disk.
 
         Args:
             model: Trained model.
             ticker: Ticker used for training (for filename).
             interval: Data interval.
+            metrics: Evaluation metrics dict from evaluate() — accuracy, precision, recall.
 
         Returns:
             Path to saved model directory.
         """
         import joblib
+        import json
+        from datetime import datetime
 
         safe_ticker = ticker.replace('/', '_').replace('-', '_')
         model_dir = MODELS_SAVED_DIR / f"{safe_ticker}_{interval}"
@@ -537,24 +703,49 @@ class ModelTrainer:
         scaler_path = model_dir / "scaler.pkl"
         joblib.dump(self.scaler, str(scaler_path))
 
-        # Save metadata
-        import json
+        # Save metadata — include accuracy + timestamp so the dashboard can display them
         meta = {
+            'pipeline_version': PIPELINE_VERSION,
             'features': self.features,
+            'n_features': len(self.features),
             'lookback_window': self.lookback_window,
             'ticker': ticker,
             'interval': interval,
+            'model_type': 'lstm_transformer',
             'lstm1_units': model.lstm1_units,
             'lstm2_units': model.lstm2_units,
             'd_model': model.d_model,
             'n_heads': model.n_heads,
             'ff_dim': model.ff_dim,
+            'trained_at': datetime.now().isoformat(),
+            'accuracy': float(metrics['accuracy']) if metrics and 'accuracy' in metrics else None,
+            'precision': float(metrics['precision']) if metrics and 'precision' in metrics else None,
+            'recall': float(metrics['recall']) if metrics and 'recall' in metrics else None,
         }
+
+        # Merge any OOS financial metrics (from backtest_predictions)
+        if metrics:
+            for key, value in metrics.items():
+                if key.startswith('oos_'):
+                    meta[key] = value
+
+        # Apply promotion gate so the predictor can refuse to load
+        # un-tradeable models without operator override.
+        promoted, reasons = self.evaluate_promotion(meta)
+        meta['promoted'] = promoted
+        meta['promotion_reasons'] = reasons
+
         meta_path = model_dir / "metadata.json"
         with open(meta_path, 'w') as f:
             json.dump(meta, f, indent=2)
 
-        logger.info(f"Model saved to {model_dir}")
+        log_msg = (
+            f"Model saved to {model_dir} "
+            f"(accuracy={meta['accuracy']}, promoted={promoted})"
+        )
+        if not promoted:
+            log_msg += f" - reasons: {reasons}"
+        logger.info(log_msg)
         return model_dir
 
     @staticmethod
