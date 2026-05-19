@@ -922,6 +922,51 @@ def paper_close(symbol):
             click.echo(f"[{status}] {r.symbol}: {r.reason}")
 
 
+@cli.command('paper-history')
+@click.option('--days', default=30, type=int, help='Days of history to show')
+def paper_history(days):
+    """Show paper trading performance: trades, win rate, P&L."""
+    from signals.alpaca_broker import AlpacaBroker
+
+    broker = AlpacaBroker()
+    if not broker.is_configured:
+        click.echo("ALPACA_API_KEY not set in .env")
+        return
+
+    perf = broker.get_performance(days)
+    trades = broker.get_trade_history(days)
+
+    click.echo(f"\n  PAPER TRADING PERFORMANCE (last {days} days)")
+    click.echo(f"  {'=' * 50}")
+
+    if perf['trades'] == 0:
+        click.echo(f"\n  No closed trades yet. Paper trading is just getting started.")
+        click.echo(f"  Trades will appear here once your bracket orders execute.\n")
+        return
+
+    pnl_sign = "+" if perf['total_pnl'] >= 0 else ""
+    click.echo(f"  Total trades:    {perf['trades']}")
+    click.echo(f"  Wins:            {perf['wins']}")
+    click.echo(f"  Losses:          {perf['losses']}")
+    click.echo(f"  Win rate:        {perf['win_rate']}%")
+    click.echo(f"  Total P&L:       {pnl_sign}${perf['total_pnl']:,.2f}")
+    click.echo(f"  Avg win:         ${perf['avg_win']:,.2f}")
+    click.echo(f"  Avg loss:        ${perf['avg_loss']:,.2f}")
+    click.echo(f"  Best trade:      ${perf['best']:,.2f}")
+    click.echo(f"  Worst trade:     ${perf['worst']:,.2f}")
+    if perf['profit_factor'] > 0:
+        click.echo(f"  Profit factor:   {perf['profit_factor']:.2f}")
+
+    click.echo(f"\n  Recent closed trades:")
+    click.echo(f"  {'Symbol':<8} {'Side':<6} {'Qty':>6} {'Entry':>10} {'Exit':>10} {'P&L':>10} {'P&L%':>8}")
+    click.echo(f"  {'─'*8} {'─'*6} {'─'*6} {'─'*10} {'─'*10} {'─'*10} {'─'*8}")
+    for t in trades[-20:]:
+        pnl_s = f"${t['pnl']:+,.2f}"
+        click.echo(f"  {t['symbol']:<8} {t['side']:<6} {t['qty']:>6.0f} "
+                   f"${t['entry']:>9.2f} ${t['exit']:>9.2f} "
+                   f"{pnl_s:>10} {t['pnl_pct']:>+7.2f}%")
+
+
 def _is_market_open(now: datetime, hours: dict) -> bool:
     """Check if the market is currently open based on UTC time."""
     if now.weekday() not in hours['days']:

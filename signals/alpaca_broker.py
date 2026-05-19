@@ -225,3 +225,107 @@ class AlpacaBroker:
         for symbol in self.get_open_positions():
             results.append(self.close_position(symbol))
         return results
+
+    def get_trade_history(self, days: int = 30) -> list[dict]:
+        """Get filled orders with calculated P&L.
+
+        Groups bracket orders to compute entry-to-exit profit per trade.
+        """
+        from datetime import datetime, timedelta
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+
+        after = datetime.now() - timedelta(days=days)
+        filled_req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=500, after=after)
+        all_orders = self.trading.get_orders(filter=filled_req)
+
+        trades = []
+        for o in all_orders:
+            if o.order_class == OrderClass.BRACKET and o.legs:
+                trade = self._parse_bracket_trade(o)
+                if trade:
+                    trades.append(trade)
+            elif o.filled_avg_price and float(o.filled_qty or 0) > 0:
+                trades.append({
+                    'symbol': o.symbol,
+                    'side': str(o.side),
+                    'qty': float(o.qty),
+                    'entry': float(o.filled_avg_price),
+                    'exit': 0.0,
+                    'pnl': 0.0,
+                    'pnl_pct': 0.0,
+                    'filled_at': str(o.filled_at),
+                    'type': 'manual',
+                })
+
+        return sorted(trades, key=lambda t: t.get('filled_at', ''))
+
+    def _parse_bracket_trade(self, parent_order) -> dict | None:
+        """Extract entry and exit from a bracket order."""
+        try:
+            entry_leg = parent_order
+            entry_price = float(entry_leg.filled_avg_price or 0)
+            entry_qty = float(entry_leg.filled_qty or 0)
+            if entry_price <= 0 or entry_qty <= 0:
+                return None
+
+            exit_price = 0.0
+            exit_side = None
+            for leg in parent_order.legs:
+                if leg.filled_avg_price and float(leg.filled_qty or 0) > 0:
+                    exit_price = float(leg.filled_avg_price)
+                    exit_side = str(leg.side)
+                    break
+
+            if exit_price <= 0:
+                return None
+
+            if entry_leg.side == OrderSide.BUY:
+                pnl = (exit_price - entry_price) * entry_qty
+                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+            else:
+                pnl = (entry_price - exit_price) * entry_qty
+                pnl_pct = ((entry_price - exit_price) / entry_price) * 100
+
+            return {
+                'symbol': entry_leg.symbol,
+                'side': str(entry_leg.side),
+                'qty': entry_qty,
+                'entry': entry_price,
+                'exit': exit_price,
+                'pnl': round(pnl, 2),
+                'pnl_pct': round(pnl_pct, 2),
+                'filled_at': str(entry_leg.filled_at),
+                'type': 'bracket',
+                'exit_type': 'TP' if exit_side != str(entry_leg.side) else 'manual',
+            }
+        except Exception as e:
+            logger.debug(f"Could not parse bracket trade: {e}")
+            return None
+
+    def get_performance(self, days: int = 30) -> dict:
+        """Calculate performance metrics from trade history."""
+        trades = self.get_trade_history(days)
+        if not trades:
+            return {'trades': 0, 'win_rate': 0, 'total_pnl': 0,
+                    'avg_win': 0, 'avg_loss': 0, 'profit_factor': 0,
+                    'best': 0, 'worst': 0}
+
+        wins = [t for t in trades if t['pnl'] > 0]
+        losses = [t for t in trades if t['pnl'] < 0]
+        total_pnl = sum(t['pnl'] for t in trades)
+        gross_profit = sum(t['pnl'] for t in wins)
+        gross_loss = abs(sum(t['pnl'] for t in losses))
+
+        return {
+            'trades': len(trades),
+            'wins': len(wins),
+            'losses': len(losses),
+            'win_rate': round(len(wins) / len(trades) * 100, 1) if trades else 0,
+            'total_pnl': round(total_pnl, 2),
+            'avg_win': round(sum(t['pnl'] for t in wins) / len(wins), 2) if wins else 0,
+            'avg_loss': round(sum(t['pnl'] for t in losses) / len(losses), 2) if losses else 0,
+            'profit_factor': round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0,
+            'best': round(max(t['pnl'] for t in trades), 2),
+            'worst': round(min(t['pnl'] for t in trades), 2),
+        }
