@@ -12,7 +12,7 @@ echo "========================================"
 echo "Paper Trade: $(date -u '+%Y-%m-%d %H:%M UTC')"
 echo "========================================"
 
-python3 main.py paper-trade --no-ensemble --no-news --no-telegram \
+python3 main.py paper-trade --no-ensemble --no-news \
     --min-confluence 2 --min-confidence 60
 
 echo
