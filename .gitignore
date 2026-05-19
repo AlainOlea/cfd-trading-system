@@ -34,12 +34,9 @@ logs/*.csv
 logs/*.txt
 *.log
 
-# Models (too large)
-models/saved/*.h5
-models/saved/*.keras
-models/saved/*.pkl
-models/saved/**/model.keras
-models/saved.backup*/
+# Models (too large — ignore everything in saved/)
+models/saved/
+!models/saved/.gitkeep
 
 # Backtesting results (generated files)
 results/*.html
