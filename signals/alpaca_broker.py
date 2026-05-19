@@ -166,34 +166,46 @@ class AlpacaBroker:
                                False, "Zero shares calculated")
 
         try:
+            is_crypto = _is_crypto(symbol)
+
             if direction == 'BUY':
                 side = OrderSide.BUY
-                sl_side = OrderSide.SELL
                 if sl >= entry or tp <= entry:
                     return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
                                        False, f"SL/TP on wrong side of entry (BUY: SL<{entry}<TP)")
             else:
                 side = OrderSide.SELL
-                sl_side = OrderSide.BUY
                 if sl <= entry or tp >= entry:
                     return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
                                        False, f"SL/TP on wrong side of entry (SELL: TP<{entry}<SL)")
 
-            order = MarketOrderRequest(
-                symbol=alpaca_symbol,
-                qty=shares,
-                side=side,
-                time_in_force=TimeInForce.DAY,
-                order_class=OrderClass.BRACKET,
-                take_profit={'limit_price': round(tp, 2)},
-                stop_loss={'stop_price': round(sl, 2)},
-            )
-
-            self.trading.submit_order(order)
-            logger.info(f"BRACKET {direction} {shares} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f} | conf={conf:.0%}")
-
-            return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
-                               True, f"Bracket order placed: {direction} {shares} shares")
+            if is_crypto:
+                # Crypto doesn't support bracket orders — place simple market entry
+                order = MarketOrderRequest(
+                    symbol=alpaca_symbol,
+                    qty=shares,
+                    side=side,
+                    time_in_force=TimeInForce.GTC,
+                )
+                self.trading.submit_order(order)
+                logger.info(f"CRYPTO {direction} {shares} {alpaca_symbol} @ ~{entry:.2f} (no bracket — manage SL/TP manually)")
+                return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
+                                   True, f"Crypto order placed: {direction} {shares} shares (SL=${sl:.2f} TP=${tp:.2f} — set manually)")
+            else:
+                # Stocks/ETFs: use bracket orders for automatic SL/TP
+                order = MarketOrderRequest(
+                    symbol=alpaca_symbol,
+                    qty=shares,
+                    side=side,
+                    time_in_force=TimeInForce.DAY,
+                    order_class=OrderClass.BRACKET,
+                    take_profit={'limit_price': round(tp, 2)},
+                    stop_loss={'stop_price': round(sl, 2)},
+                )
+                self.trading.submit_order(order)
+                logger.info(f"BRACKET {direction} {shares} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f} | conf={conf:.0%}")
+                return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
+                                   True, f"Bracket order placed: {direction} {shares} shares")
 
         except Exception as e:
             logger.error(f"Order failed for {symbol}: {e}")
