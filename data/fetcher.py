@@ -142,6 +142,77 @@ class DataFetcher:
         logger.info(f"Saved {len(df)} rows to {filepath}")
         return filepath
 
+    def fetch_bulk(
+        self,
+        ticker: str,
+        interval: str,
+        total_days: int = 2190,
+        chunk_days: int | None = None,
+    ) -> pd.DataFrame:
+        """Fetch historical data in chunks, bypassing yfinance limits.
+
+        Yahoo Finance limits 1h/15m/5m data to ~730 days per request.
+        This method splits the range into chunks, fetches each chunk,
+        and merges them into one clean DataFrame.
+
+        Args:
+            ticker: Symbol (e.g. 'SPY', 'BTC-USD').
+            interval: Data interval ('1d','1h','15m','5m').
+            total_days: Total calendar days to fetch.
+            chunk_days: Days per chunk (auto-set per interval).
+
+        Returns:
+            Merged OHLCV DataFrame sorted by date.
+        """
+        # Auto-set chunk size based on yfinance limits
+        if chunk_days is None:
+            if interval in ('1d',):
+                chunk_days = total_days  # 1d has no limit, one fetch
+            else:
+                chunk_days = 700  # Safe margin under 730-day limit
+
+        from datetime import datetime, timedelta
+
+        end = datetime.now()
+        chunks = []
+        remaining = total_days
+
+        while remaining > 0:
+            chunk_start = end - timedelta(days=min(chunk_days, remaining))
+            logger.info(
+                f"Bulk fetch {ticker} {interval}: "
+                f"{chunk_start.strftime('%Y-%m-%d')} to {end.strftime('%Y-%m-%d')}"
+            )
+
+            try:
+                data = yf.download(
+                    ticker,
+                    start=chunk_start.strftime('%Y-%m-%d'),
+                    end=end.strftime('%Y-%m-%d'),
+                    interval=interval,
+                    auto_adjust=YFINANCE_AUTO_ADJUST,
+                    prepost=YFINANCE_PREPOST,
+                    threads=YFINANCE_THREADS,
+                    progress=False,
+                )
+                if not data.empty:
+                    df = self._normalize_columns(data)
+                    chunks.append(df)
+            except Exception as e:
+                logger.warning(f"Chunk failed for {ticker}: {e}")
+
+            end = chunk_start
+            remaining -= chunk_days
+
+        if not chunks:
+            raise ValueError(f"No data returned for {ticker} across {total_days}d")
+
+        merged = pd.concat(chunks)
+        merged = merged[~merged.index.duplicated(keep='first')]
+        merged.sort_index(inplace=True)
+        logger.info(f"Bulk fetch complete: {len(merged)} rows for {ticker}")
+        return merged
+
     def load_from_csv(self, ticker: str, interval: str) -> pd.DataFrame:
         """Load DataFrame from CSV in data/raw/.
 

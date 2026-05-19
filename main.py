@@ -392,12 +392,14 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
               help='Comma-separated tickers to pool for cross-sectional training')
 @click.option('--no-triple-barrier', is_flag=True,
               help='Use simple next-bar direction instead of triple barrier labels')
-def train_xgb_cross(interval, tickers, no_triple_barrier):
+@click.option('--from-csv', is_flag=True,
+              help='Load pre-fetched CSV data instead of live fetching (use after fetch-all-history)')
+def train_xgb_cross(interval, tickers, no_triple_barrier, from_csv):
     """Train one XGBoost model on ALL tickers pooled together (cross-sectional).
 
     Per Alzaman (2024) and Byun et al. (2024), cross-sectional training
     outperforms per-asset training by pooling information across assets.
-    Uses triple-barrier labels (Lopez de Prado method) by default.
+    Uses binary threshold labels (0.5% min move) by default.
     """
     try:
         ticker_list = [t.strip() for t in tickers.split(',')]
@@ -407,14 +409,14 @@ def train_xgb_cross(interval, tickers, no_triple_barrier):
         click.echo(f"  {'=' * 60}")
         click.echo(f"  Interval:          {interval}")
         click.echo(f"  Tickers:           {len(ticker_list)} ({', '.join(ticker_list[:5])}...)")
-        click.echo(f"  Labels:            {'triple-barrier' if use_triple else 'next-bar direction'}")
+        click.echo(f"  Labels:            {'triple-barrier' if use_triple else 'binary-threshold'}")
+        click.echo(f"  Data source:       {'CSV cache' if from_csv else 'Live Yahoo Finance'}")
         click.echo()
 
         from data.fetcher import DataFetcher
         from data.processor import DataProcessor
         from indicators.technical import TechnicalIndicators
         from models.xgboost_model import XGBoostTrader
-        from config.settings import ML_PROMOTION_GATE
 
         fetcher = DataFetcher()
         processor = DataProcessor()
@@ -422,10 +424,13 @@ def train_xgb_cross(interval, tickers, no_triple_barrier):
         total_samples = 0
 
         for ticker in ticker_list:
-            click.echo(f"  Fetching {ticker}...", nl=False)
+            click.echo(f"  Loading {ticker}...", nl=False)
             try:
-                df = fetcher.fetch_yfinance(ticker, interval, 365)
-                df = processor.clean_data(df)
+                if from_csv:
+                    df = fetcher.load_from_csv(ticker, interval)
+                else:
+                    df = fetcher.fetch_yfinance(ticker, interval, 365)
+                    df = processor.clean_data(df)
                 df = TechnicalIndicators.add_all_indicators(df)
                 ticker_dfs[ticker] = df
                 samples = len(df.dropna())
@@ -435,7 +440,7 @@ def train_xgb_cross(interval, tickers, no_triple_barrier):
                 click.echo(f" SKIP ({e})")
 
         if not ticker_dfs:
-            click.echo("\n  ❌ No data fetched for any ticker.")
+            click.echo("\n  ❌ No data loaded for any ticker.")
             return
 
         click.echo(f"\n  Total pooled bars: {total_samples}")
@@ -470,6 +475,55 @@ def train_xgb_cross(interval, tickers, no_triple_barrier):
         click.echo(f"\n❌ Error: {str(e)}", err=True)
         logger.error(f"Cross-sectional training error: {e}", exc_info=True)
         sys.exit(1)
+
+
+@cli.command('fetch-all-history')
+@click.option('--years', default=5, type=int, help='Years of daily data to fetch')
+@click.option('--tickers', default='SPY,QQQ,IWM,GLD,AAPL,NVDA,MSFT',
+              help='Comma-separated tickers')
+def fetch_all_history(years, tickers):
+    """Fetch extended historical data for training (bypasses yfinance limits).
+
+    Fetches daily data up to 10 years back and hourly data up to 2 years.
+    Saves clean CSVs to data/raw/ for use in training.
+    """
+    from data.fetcher import DataFetcher
+    from data.processor import DataProcessor
+
+    ticker_list = [t.strip() for t in tickers.split(',')]
+    fetcher = DataFetcher()
+    processor = DataProcessor()
+
+    click.echo(f"\n📥 FETCHING EXTENDED HISTORY ({years}y daily, 2y hourly)")
+    click.echo(f"   Tickers: {len(ticker_list)}")
+    click.echo()
+
+    for ticker in ticker_list:
+        click.echo(f"  {ticker}:", nl=False)
+
+        try:
+            # Daily: unlimited history
+            df_d = fetcher.fetch_bulk(ticker, '1d', total_days=years * 365)
+            df_d = processor.clean_data(df_d)
+            processor.validate_data(df_d)
+            fetcher.save_to_csv(df_d, ticker, '1d')
+            click.echo(f" {len(df_d)}d", nl=False)
+        except Exception as e:
+            click.echo(f" daily:SKIP({e})", nl=False)
+
+        try:
+            # Hourly: up to 2 years
+            df_h = fetcher.fetch_bulk(ticker, '1h', total_days=700, chunk_days=350)
+            df_h = processor.clean_data(df_h)
+            processor.validate_data(df_h)
+            fetcher.save_to_csv(df_h, ticker, '1h')
+            click.echo(f" {len(df_h)}h")
+        except Exception as e:
+            click.echo(f" hourly:SKIP({e})")
+
+    click.echo(f"\n✅ History fetched. Ready for training:")
+    click.echo(f"   python3 main.py train-xgb-cross --interval 1d")
+    click.echo(f"   python3 main.py train-xgb-cross --interval 1h")
 
 # ============================================
 # COMMAND: LIST STRATEGIES
