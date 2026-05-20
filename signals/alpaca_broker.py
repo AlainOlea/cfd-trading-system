@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'GLD', 'AAPL', 'NVDA', 'MSFT'}
 ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD'}
 DEFAULT_RISK_CAPITAL = 2000.0  # 2% of $100k
+MAX_POSITION_PCT = 0.05       # 5% max per position (~$5k)
+MIN_POSITION_VALUE = 100.0    # Don't bother with trades smaller than $100
 
 
 def _to_alpaca_symbol(ticker: str) -> str:
@@ -110,26 +112,33 @@ class AlpacaBroker:
         entry_price: float,
         stop_loss: float,
         risk_capital: float = DEFAULT_RISK_CAPITAL,
-        max_position_pct: float = 0.10,
-    ) -> int:
-        """Calculate shares respecting both risk and account size limits.
+        max_position_pct: float = MAX_POSITION_PCT,
+    ) -> float:
+        """Calculate position size respecting risk and account limits.
 
-        Caps position at max_position_pct of buying_power (not equity).
-        Uses available cash for crypto (no margin on crypto).
+        Returns fractional shares for small positions, whole for larger ones.
+        Uses notional value cap to prevent single positions dominating account.
         """
         risk_per_share = abs(entry_price - stop_loss)
         if risk_per_share <= 0:
-            return 0
+            return 0.0
         shares_by_risk = risk_capital / risk_per_share
 
         acct = self.get_account_summary()
-        buying_power = acct.get('buying_power', acct.get('equity', 100000))
-        cash = acct.get('cash', buying_power)
-        max_position_value = min(buying_power, cash) * max_position_pct
+        cash = acct.get('cash', acct.get('equity', 100000))
+        max_position_value = cash * max_position_pct
         shares_by_capital = max_position_value / entry_price
 
         shares = min(shares_by_risk, shares_by_capital)
-        return max(1, round(shares))
+
+        # Round to 4 decimals for fractional shares
+        shares = round(shares, 4)
+
+        # Don't trade if position value would be less than $100
+        if shares * entry_price < MIN_POSITION_VALUE:
+            return 0.0
+
+        return shares
 
     def place_signal(self, signal) -> TradeResult:
         """Execute a trading signal as a bracket order on Alpaca paper.
@@ -185,22 +194,24 @@ class AlpacaBroker:
                                        False, f"SL/TP on wrong side of entry (SELL: TP<{entry}<SL)")
 
             if is_crypto:
-                # Crypto doesn't support bracket orders — place simple market entry
+                # Crypto: use notional value (buy $X worth) with simple market order
+                notional = round(shares * entry, 2)
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
-                    qty=shares,
+                    notional=notional,
                     side=side,
                     time_in_force=TimeInForce.GTC,
                 )
                 self.trading.submit_order(order)
-                logger.info(f"CRYPTO {direction} {shares} {alpaca_symbol} @ ~{entry:.2f} (no bracket — manage SL/TP manually)")
-                return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
-                                   True, f"Crypto order placed: {direction} {shares} shares (SL=${sl:.2f} TP=${tp:.2f} — set manually)")
+                logger.info(f"CRYPTO {direction} {alpaca_symbol}: ${notional:.0f} notional @ ~{entry:.2f}")
+                return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                                   True, f"Crypto: ${notional:,.0f} {direction} (SL=${sl:.2f} TP=${tp:.2f})")
             else:
-                # Stocks/ETFs: use bracket orders for automatic SL/TP
+                # Stocks/ETFs: whole shares with bracket order for auto SL/TP
+                qty = max(1, round(shares))
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
-                    qty=shares,
+                    qty=qty,
                     side=side,
                     time_in_force=TimeInForce.DAY,
                     order_class=OrderClass.BRACKET,
@@ -208,9 +219,9 @@ class AlpacaBroker:
                     stop_loss={'stop_price': round(sl, 2)},
                 )
                 self.trading.submit_order(order)
-                logger.info(f"BRACKET {direction} {shares} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f} | conf={conf:.0%}")
-                return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
-                                   True, f"Bracket order placed: {direction} {shares} shares")
+                logger.info(f"BRACKET {direction} {qty} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f}")
+                return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
+                                   True, f"Bracket: {direction} {qty} sh")
 
         except Exception as e:
             logger.error(f"Order failed for {symbol}: {e}")
