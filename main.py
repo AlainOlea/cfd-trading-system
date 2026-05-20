@@ -926,6 +926,12 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
     results = pipeline.run_all(category=category, ticker_filter=ticker)
     actionable = [r for r in results if r.is_actionable()]
 
+    # Send Telegram notifications for all actionable signals
+    if send_telegram:
+        sent_count = pipeline.notify_actionable(actionable)
+        if sent_count > 0:
+            click.echo(f"  Telegram: {sent_count} notification(s) sent")
+
     click.echo(f"\n  Generated {len(results)} signals, {len(actionable)} actionable")
     click.echo()
 
