@@ -13,6 +13,6 @@ echo "Paper Trade: $(date -u '+%Y-%m-%d %H:%M UTC')"
 echo "========================================"
 
 python3 main.py paper-trade --no-ensemble --no-news \
-    --min-confluence 2 --min-confidence 60
+    --min-confluence 3 --min-confidence 60
 
 echo

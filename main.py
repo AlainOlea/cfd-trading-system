@@ -926,11 +926,15 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
     results = pipeline.run_all(category=category, ticker_filter=ticker)
     actionable = [r for r in results if r.is_actionable()]
 
-    # Send Telegram notifications for all actionable signals
+    # Send Telegram only for quality signals (3+ stars, before trade filter)
     if send_telegram:
-        sent_count = pipeline.notify_actionable(actionable)
-        if sent_count > 0:
-            click.echo(f"  Telegram: {sent_count} notification(s) sent")
+        quality = [r for r in actionable if r.confluence_score >= min_confluence]
+        if quality:
+            sent_count = pipeline.notify_actionable(quality)
+            if sent_count > 0:
+                click.echo(f"  Telegram: {sent_count} notification(s) sent")
+        else:
+            click.echo(f"  Telegram: no signals with {min_confluence}+ stars")
 
     click.echo(f"\n  Generated {len(results)} signals, {len(actionable)} actionable")
     click.echo()
