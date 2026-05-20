@@ -110,17 +110,22 @@ class AlpacaBroker:
         entry_price: float,
         stop_loss: float,
         risk_capital: float = DEFAULT_RISK_CAPITAL,
-        max_position_pct: float = 0.20,
+        max_position_pct: float = 0.10,
     ) -> int:
-        """Calculate shares respecting both risk and account size limits."""
+        """Calculate shares respecting both risk and account size limits.
+
+        Caps position at max_position_pct of buying_power (not equity).
+        Uses available cash for crypto (no margin on crypto).
+        """
         risk_per_share = abs(entry_price - stop_loss)
         if risk_per_share <= 0:
             return 0
         shares_by_risk = risk_capital / risk_per_share
 
         acct = self.get_account_summary()
-        equity = acct.get('equity', 100000)
-        max_position_value = equity * max_position_pct
+        buying_power = acct.get('buying_power', acct.get('equity', 100000))
+        cash = acct.get('cash', buying_power)
+        max_position_value = min(buying_power, cash) * max_position_pct
         shares_by_capital = max_position_value / entry_price
 
         shares = min(shares_by_risk, shares_by_capital)
