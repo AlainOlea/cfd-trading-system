@@ -1,47 +1,32 @@
-# CFD Trading System 🚀
+# CFD Trading System
 
-Sistema automático de trading para scalping CFDs con señales basadas en análisis técnico e IA.
+Sistema automático de trading para CFDs con señales técnicas + ML (XGBoost cross-sectional), paper trading en Alpaca, y notificaciones Telegram.
 
-**Estado**: ✅ Completo (Fases 0-9)
+**Estado**: Producción. 16 comandos CLI. 47 tests. Cron activo 24/7.
 
 ---
 
 ## ¿Qué hace?
 
 ```
-Tu laptop monitorea mercados
+Cron cada hora
    ↓
-Calcula indicadores técnicos
+Yahoo Finance → datos frescos de 10 tickers
    ↓
-Genera señales BUY/SELL
+Indicadores técnicos (21) + features engineered (4)
    ↓
-Notificación Telegram inmediata
+3 estrategias generan señales BUY/SELL + SL + TP
    ↓
-Ejecutas manual en Plus500
+XGBoost cross-sectional vota (80-84% test accuracy)
    ↓
-Ganancia 🎉
+Confluence scoring (1-5 estrellas)
+   ↓
+Telegram: señales con 3+ estrellas → tu teléfono
+   ↓
+Alpaca Paper: bracket orders automáticos (entry + SL + TP)
+   ↓
+Paper dashboard: P&L, win rate, equity curve
 ```
-
----
-
-## Features
-
-✅ **3 Estrategias**
-- MACD + VWAP (momentum)
-- RSI + Bollinger Bands (mean reversion)
-- MA Crossover (trending)
-
-✅ **Análisis Técnico**: 12 indicadores, 26 columnas
-
-✅ **Backtesting**: VectorBT (1000x más rápido)
-
-✅ **ML**: LSTM+Transformer (70K params, 95%+ accuracy con datos)
-
-✅ **Monitoreo 24/7**: Watch mode cada 15 min
-
-✅ **Telegram**: Alerts en tiempo real
-
-✅ **47 Tests** (100% passing)
 
 ---
 
@@ -49,66 +34,133 @@ Ganancia 🎉
 
 ```bash
 # Setup
-python3.12 -m venv venv && source venv/bin/activate
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
-# Datos
-python3 main.py fetch-data --ticker SPY --interval 1d --days 365
+# Ver estado
+python3 main.py status
 
-# Validar
-python3 main.py backtest --strategy macd_vwap --ticker SPY --interval 1d
+# Pipeline completo (señales + Telegram)
+python3 main.py pipeline --telegram
 
-# Monitorear (LO QUE NECESITAS)
-python3 main.py watch --tickers SPY,GLD,BTC-USD --strategies macd_vwap,rsi_bb --every 900
+# Paper trading (señales + ejecución automática en sandbox)
+python3 main.py paper-trade --dry-run          # Simular sin ejecutar
+python3 main.py paper-trade                    # Ejecutar en vivo
+python3 main.py paper-status                   # Ver cuenta y posiciones
+python3 main.py paper-history                  # Historial de trades y P&L
+```
+
+---
+
+## Comandos
+
+| Comando | Descripción |
+|---------|-------------|
+| `pipeline` | Pipeline unificado: datos → indicadores → estrategias → ML → Telegram |
+| `paper-trade` | Pipeline + ejecución automática en Alpaca paper (bracket orders) |
+| `paper-status` | Estado de cuenta paper: equity, posiciones, órdenes pendientes |
+| `paper-history` | Historial de trades cerrados: win rate, P&L, profit factor |
+| `paper-close` | Cerrar posición(es) paper |
+| `signal` | Generar una señal individual |
+| `scan` | Escanear múltiples tickers y estrategias |
+| `watch` | Monitoreo continuo con horarios de mercado |
+| `backtest` | Backtesting con VectorBT |
+| `train-lstm` | Entrenar modelo LSTM+Transformer (legacy) |
+| `train-xgb-cross` | Entrenar XGBoost cross-sectional (todos los tickers juntos) |
+| `fetch-data` | Descargar datos OHLCV |
+| `fetch-all-history` | Descargar historial extendido (5 años diario, 2 años horario) |
+| `list-strategies` | Listar estrategias disponibles |
+| `list-tickers` | Listar tickers configurados |
+| `status` | Estado del sistema |
+
+---
+
+## Estrategias
+
+| Estrategia | Tipo | Entrada | SL | TP |
+|-----------|------|---------|-----|-----|
+| `macd_vwap` | Trend-following | MACD cross + VWAP filter | 0.5% | 1% |
+| `rsi_bb` | Mean-reversion | RSI extreme + BB touch | 0.7% | BB middle |
+| `ma_crossover` | Swing | SMA 50/200 golden cross | 2% | 3% |
+
+Todas soportan filtro de tendencia (ADX ≥ 20) y SL/TP dinámico basado en ATR.
+
+---
+
+## ML: XGBoost Cross-Sectional
+
+| | 1d | 1h |
+|---|-----|-----|
+| Modelo | XGBoost (200 trees, depth=5) | XGBoost (200 trees, depth=5) |
+| Entrenamiento | Cross-sectional (7 tickers) | Cross-sectional (7 tickers) |
+| Samples train | 4,890 | 3,962 |
+| Features | 13 (OHLCV + indicadores + engineered) | 13 |
+| Labels | Binary threshold (≥0.5% move) | Binary threshold (≥0.5% move) |
+| Test accuracy | 74.4% | 84.4% |
+
+**LSTM+Transformer** (legacy): disponible como fallback vía `PRIMARY_ML_MODEL='lstm'` en config.
+
+---
+
+## Confluence Scoring (1-5 estrellas)
+
+| Estrellas | Significado |
+|-----------|-------------|
+| 1★ | Señal BUY/SELL en al menos 1 timeframe |
+| 2★ | Multi-timeframe agreement **o** ML confirma |
+| 3★ | ML confirma **y** (multi-TF **o** ML >65% confianza) |
+| 4★ | Ensemble STRONG consensus |
+| 5★ | Confianza promedio ≥70% |
+
+**Cron actual**: solo tradea y notifica señales con 3+ estrellas.
+
+---
+
+## Setup Alpaca Paper Trading
+
+1. Crear cuenta gratis en https://alpaca.markets
+2. Obtener API keys del dashboard
+3. Agregar a `.env`:
+```bash
+ALPACA_API_KEY=PK...
+ALPACA_SECRET_KEY=...
+ALPACA_PAPER_URL=https://paper-api.alpaca.markets
+```
+
+---
+
+## Cron (automático)
+
+```
+0 * * * *   run_paper_trade.sh    # Cada hora: pipeline + trade + Telegram
+0 0 * * 0   reset_paper.sh        # Domingo: cerrar todas las posiciones
 ```
 
 ---
 
 ## Documentación
 
-📖 **GUIA_COMPLETA.md** ← LEER PRIMERO
-- Scalping explicado desde cero
-- Cada indicador paso a paso  
-- Setup Telegram detallado
-- Generación de señales
-- FAQ completo
+| Documento | Contenido |
+|-----------|-----------|
+| `docs/guides/INTEGRATION_SUMMARY.md` | Arquitectura completa del sistema |
+| `docs/reference/ML_RESEARCH.md` | Bibliografía ML: 8 papers + 2 libros |
+| `docs/analysis/SESSION_2026-05-19.md` | Changelog de la sesión de auditoría |
+| `docs/quickstart/GUIA_COMPLETA.md` | Guía completa en español |
 
 ---
 
-## Comandos
+## Tests
 
 ```bash
-python3 main.py fetch-data --ticker SPY --interval 1d --days 365
-python3 main.py backtest --strategy macd_vwap --ticker SPY --interval 1d
-python3 main.py signal --strategy macd_vwap --ticker SPY --interval 1d
-python3 main.py signal --strategy macd_vwap --ticker SPY --use-ml  # con ML
-python3 main.py train-lstm --ticker SPY --epochs 50
-python3 main.py scan --tickers SPY,GLD,BTC-USD --strategies macd_vwap,rsi_bb
-python3 main.py watch --tickers SPY,GLD,BTC-USD --strategies macd_vwap,rsi_bb --every 900
-pytest tests/ -v
+pytest tests/ -v    # 47 tests, todos pasan
 ```
-
----
-
-## Resultados
-
-**SPY 1 año backtest:**
-- Return: 7.16%
-- Win Rate: 37.5%
-- Sharpe: 0.94
-
-**ML Model:**
-- Accuracy: 44%+ (crece con datos)
-- GPU: 10x más rápido
 
 ---
 
 ## ⚠️ Disclaimer
 
-CFDs = RIESGO EXTREMO. Puedes perder todo. Usa bajo tu propio riesgo.
+CFDs conllevan riesgo extremo. Paper trading en Alpaca usa dinero virtual. No tradees dinero real sin validar estadísticas.
 
 ---
 
-**¡Happy Trading!** 🚀
-
-(Lee GUIA_COMPLETA.md para TODO explicado)
+*Última actualización: 2026-05-20*
