@@ -447,18 +447,15 @@ class UnifiedPipeline:
     def _compute_confluence(self, results: list[PipelineResult]) -> int:
         """Compute multi-timeframe confluence score (0-5 stars).
 
-        Stars are awarded for:
-        1. Multiple timeframes agree on direction
-        2. ML confirms the direction
-        3. Ensemble has STRONG consensus
-        4. News sentiment aligns
-        5. High confidence across all layers
+        Stars:
+        1. At least one actionable signal (base)
+        2. Multiple timeframes agree OR ML confirms the direction
+        3. Both ML confirms AND (multi-TF agree OR ML confidence >65%)
+        4. Ensemble has STRONG consensus
+        5. High confidence across all layers (avg >= 70%)
 
-        Args:
-            results: PipelineResults for the same ticker across intervals.
-
-        Returns:
-            Score from 0 to 5.
+        Stars are additive: a signal with ML confirmation and multi-TF
+        agreement but no ensemble gets 3 stars.
         """
         if not results:
             return 0
@@ -472,16 +469,23 @@ class UnifiedPipeline:
         # Star 1: At least one actionable signal
         stars += 1
 
-        # Star 2: Multiple timeframes agree
-        if len(directions) >= 2 and len(set(directions)) == 1:
-            stars += 1
-
-        # Star 3: ML confirms (any interval)
+        # Star 2: Multiple timeframes agree OR ML confirms
+        multi_tf = len(directions) >= 2 and len(set(directions)) == 1
         ml_confirms = any(
             r.ml_prediction and r.ml_prediction.get('direction') == r.final_direction
             for r in results if r.final_direction != 'HOLD'
         )
-        if ml_confirms:
+        if multi_tf or ml_confirms:
+            stars += 1
+
+        # Star 3: ML confirms AND (multi-TF or strong ML conviction >65%)
+        ml_strong = any(
+            r.ml_prediction
+            and r.ml_prediction.get('direction') == r.final_direction
+            and r.ml_prediction.get('confidence', 0) > 0.65
+            for r in results if r.final_direction != 'HOLD'
+        )
+        if ml_confirms and (multi_tf or ml_strong):
             stars += 1
 
         # Star 4: Ensemble STRONG consensus (any interval)
