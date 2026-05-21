@@ -274,10 +274,11 @@ class AlpacaBroker:
                 if trade:
                     trades.append(trade)
             elif o.filled_avg_price and float(o.filled_qty or 0) > 0:
+                qty = float(o.filled_qty or o.qty or 0)
                 trades.append({
                     'symbol': o.symbol,
                     'side': str(o.side),
-                    'qty': float(o.qty),
+                    'qty': qty,
                     'entry': float(o.filled_avg_price),
                     'exit': 0.0,
                     'pnl': 0.0,
