@@ -50,7 +50,7 @@ TICKERS = {
 }
 
 # Default tickers for testing (expanded)
-DEFAULT_TICKERS = ['SPY', 'QQQ', 'GLD', 'BTC-USD', 'ETH-USD', 'AAPL', 'NVDA']
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD', 'XRP-USD']
 
 # ============================================
 # TIMEFRAMES & DATES
@@ -411,16 +411,26 @@ PIPELINE_TICKERS_RAW = [
     ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     ('QQQ', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     ('IWM', 'indices', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('DIA', 'indices', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     # Commodities
     ('GLD', 'commodities', ['1d', '1h', '15m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('SLV', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('USO', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('UNG', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     # Stocks
     ('AAPL', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     ('NVDA', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     ('MSFT', 'stocks', ['1d'], ['macd_vwap'], True, True, True, 2),
+    ('AMZN', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('GOOGL', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('META', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('TSLA', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     # Crypto
     ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     ('ETH-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     ('SOL-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, False, 2),
+    ('DOGE-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('XRP-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
 ]
 
 print("✅ Configuration loaded successfully")

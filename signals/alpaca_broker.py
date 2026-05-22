@@ -21,8 +21,8 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 
 logger = logging.getLogger(__name__)
 
-ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'GLD', 'AAPL', 'NVDA', 'MSFT'}
-ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD'}
+ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA'}
+ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD', 'DOGE-USD': 'DOGE/USD', 'XRP-USD': 'XRP/USD'}
 DEFAULT_RISK_CAPITAL = 2000.0  # 2% of $100k
 MAX_POSITION_PCT = 0.05       # 5% max per position (~$5k)
 MIN_POSITION_VALUE = 100.0    # Don't bother with trades smaller than $100
@@ -194,7 +194,10 @@ class AlpacaBroker:
                                        False, f"SL/TP on wrong side of entry (SELL: TP<{entry}<SL)")
 
             if is_crypto:
-                # Crypto: use notional value (buy $X worth) with simple market order
+                if direction == 'SELL':
+                    return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                                       False, "Alpaca does not support shorting crypto")
+                # Crypto BUY: notional value with simple market order
                 notional = round(shares * entry, 2)
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
@@ -209,14 +212,34 @@ class AlpacaBroker:
             else:
                 # Stocks/ETFs: whole shares with bracket order for auto SL/TP
                 qty = max(1, round(shares))
+                # Fetch latest price to align SL/TP with current market
+                try:
+                    pos = self.get_open_positions()
+                    latest_price = float(self.trading.get_last_quote(alpaca_symbol).ask_price or
+                                         self.trading.get_last_trade(alpaca_symbol).price)
+                    if direction == 'SELL':
+                        tp = min(tp, latest_price - 0.01)
+                        sl = max(sl, latest_price + 0.01)
+                        if tp >= sl:
+                            return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
+                                               False, "SL/TP too tight after price move")
+                    else:
+                        tp = max(tp, latest_price + 0.01)
+                        sl = min(sl, latest_price - 0.01)
+                        if tp <= sl:
+                            return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
+                                               False, "SL/TP too tight after price move")
+                except Exception:
+                    pass
+                precision = 4 if tp < 1.0 else 2
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
                     qty=qty,
                     side=side,
                     time_in_force=TimeInForce.DAY,
                     order_class=OrderClass.BRACKET,
-                    take_profit={'limit_price': round(tp, 2)},
-                    stop_loss={'stop_price': round(sl, 2)},
+                    take_profit={'limit_price': round(tp, precision)},
+                    stop_loss={'stop_price': round(sl, precision)},
                 )
                 self.trading.submit_order(order)
                 logger.info(f"BRACKET {direction} {qty} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f}")
@@ -230,19 +253,29 @@ class AlpacaBroker:
 
     def close_position(self, symbol: str) -> TradeResult:
         try:
-            pos = self.trading.get_open_position(symbol)
+            alpaca_symbol = _to_alpaca_symbol(symbol)
+            positions = self.trading.get_all_positions()
+            pos = None
+            for p in positions:
+                if p.symbol == alpaca_symbol or p.symbol == alpaca_symbol.replace('/', ''):
+                    pos = p
+                    break
+            if pos is None:
+                return TradeResult(symbol, 'CLOSE', 0, 0, 0, 0, 0, False,
+                                   f"No open position for {symbol}")
+            actual_symbol = pos.symbol
             qty = float(pos.qty)
-            side = OrderSide.SELL if float(pos.qty) > 0 else OrderSide.BUY
+            side = OrderSide.SELL if qty > 0 else OrderSide.BUY
             qty = abs(qty)
 
             order = MarketOrderRequest(
-                symbol=symbol,
+                symbol=actual_symbol,
                 qty=qty,
                 side=side,
                 time_in_force=TimeInForce.GTC,
             )
             self.trading.submit_order(order)
-            logger.info(f"CLOSE {symbol}: {side.value} {qty} shares")
+            logger.info(f"CLOSE {actual_symbol}: {side.value} {qty}")
             return TradeResult(symbol, 'CLOSE', qty, 0, 0, 0, 0, True, f"Closed {symbol}")
         except Exception as e:
             logger.error(f"Close failed for {symbol}: {e}")
