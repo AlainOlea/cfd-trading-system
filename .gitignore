@@ -75,3 +75,5 @@ htmlcov/
 *.temp
 /tmp/
 cfd_validation/
+models/saved.backup.*/
+openclaw_config_backup.json
