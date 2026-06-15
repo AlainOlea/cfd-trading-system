@@ -1,3 +1,47 @@
+# Session Changelog
+
+---
+
+## Session 11: Paper Trading Automation (2026-06-14)
+
+### Problem
+WSL cron died when Windows entered sleep/hibernate. Paper trading was unreliable.
+
+### Solution
+Migrated from WSL cron to **Windows Task Scheduler**. Tasks call `.bat` files that invoke `wsl.exe` only during execution. WSL starts on-demand and shuts down after.
+
+### Changes Made
+1. **Created** `run_paper_hourly.ps1` and `run_paper_daily.ps1` (reference docs in project root)
+2. **Created** `C:\Users\alans\cfd-scripts\run_cfd_hourly.bat` and `run_cfd_daily.bat` (Windows side)
+3. **Registered** two Windows tasks: `CFD Paper Hourly` (Mon-Fri, every 1h, 07:00-15:59 ET) and `CFD Paper Daily` (Mon-Fri, 07:00 ET)
+4. **Removed** WSL crontab (replaced by Windows Task Scheduler)
+5. **Deleted** old scripts: `run_paper_trade.sh`, `run_paper_hourly.sh`, `run_paper_daily.sh`, `reset_paper.sh`
+6. **Updated** `.gitignore` with `logs/paper/`
+7. **Created** `logs/paper/` directory for persistent logs
+8. **Updated** `CLAUDE.md` with Paper Trading Automation section, dependencies, and session changelog
+9. **Updated** `docs/README.md` with references to paper trading
+
+### Architecture
+```
+Windows Task Scheduler (survives sleep/hibernate)
+  → C:\Users\alans\cfd-scripts\run_cfd_*.bat
+    → wsl.exe -d Ubuntu --exec bash -c "cd /project && python3 main.py paper-trade ..."
+      → WSL starts on-demand, executes, shuts down
+```
+
+### Log Files
+```
+logs/paper/
+  ├── hourly_YYYY-MM-DD.log
+  └── daily_YYYY-MM-DD.log
+```
+
+### Critical Dependencies (DO NOT CHANGE)
+- `C:\Users\alans\cfd-scripts\run_cfd_hourly.bat`
+- `C:\Users\alans\cfd-scripts\run_cfd_daily.bat`
+
+---
+
 # Session Changelog - Unified Pipeline + Fresh Data Fix
 
 **Session Date**: 2026-02-15

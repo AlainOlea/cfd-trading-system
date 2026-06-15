@@ -70,10 +70,21 @@ signals/pipeline.py         # [DONE] UnifiedPipeline: consolidacion de 6 flujos 
 signals/generator.py        # [DONE] SignalGenerator + Signal dataclass: fetch -> indicators -> strategy -> signal
 signals/manager.py          # [DONE] SignalManager: log CSV, historial, formato terminal
 signals/telegram_bot.py     # [DONE] TelegramNotifier: Markdown signals via Telegram bot
+signals/alpaca_broker.py    # [DONE] AlpacaBroker: paper trading bracket orders (SL/TP auto)
 models/hybrid_model.py      # [DONE] HybridLSTMTransformer: LSTM 2x50 -> Transformer 2-head -> Dense -> sigmoid
 models/trainer.py           # [DONE] ModelTrainer: prepare data, train, evaluate, save/load (weights + scaler + metadata)
 models/predictor.py         # [DONE] PricePredictor: load model, predict direction, filter signals
+models/xgboost_model.py     # [DONE] XGBoostTrader: cross-sectional XGBoost + triple-barrier labels
+models/ensemble_predictor.py # [DONE] EnsemblePredictor: LSTM + XGBoost voting
 tests/                      # [DONE] 47 tests (conftest, data, indicators, strategies, backtesting, signals)
+
+# --- Paper Trading Automation (Windows Task Scheduler) ---
+# ⚠️ CRITICAL: These files are DEPENDENCIES of Windows scheduled tasks.
+# Changing names/paths WILL break automated trading.
+run_paper_hourly.ps1        # Reference: PowerShell wrapper for hourly signals (docs only)
+run_paper_daily.ps1         # Reference: PowerShell wrapper for daily swing signals (docs only)
+setup_tasks.ps1             # Reference: Windows Task Scheduler setup script (docs only)
+logs/paper/                 # Persistent paper trade logs (gitignored)
 ```
 
 ## Implemented Modules (Details)
@@ -164,6 +175,16 @@ tests/                      # [DONE] 47 tests (conftest, data, indicators, strat
 - `is_configured` property: checks BOT_TOKEN and CHAT_ID are set
 - Graceful degradation: returns False silently if not configured
 
+### signals/alpaca_broker.py - AlpacaBroker
+- `place_signal(signal, interval)` -> executes bracket orders on Alpaca paper sandbox
+- `get_open_positions()` -> dict of current positions with P&L
+- `has_position(symbol)` -> checks if holding a position
+- `calculate_shares(entry, stop_loss)` -> position sizing (2% risk, 5% max per position)
+- `get_trade_history(days)` -> closed trades with P&L calculation
+- `get_performance(days)` -> win rate, profit factor, avg win/loss
+- Stocks: bracket orders with SL/TP. Crypto: notional market orders (no SL/TP — Alpaca limitation)
+- Swing trades (1d): GTC orders, 2x wider SL/TP via `_widen_sl_tp_for_swing()`
+
 ### models/hybrid_model.py - HybridLSTMTransformer
 - `TransformerEncoderBlock` custom Keras layer: MultiHeadAttention + FFN + LayerNorm + residuals
 - `HybridLSTMTransformer.build(input_shape)` -> compiled Keras model. Architecture: Input -> LSTM(50) -> Dropout -> LSTM(50) -> Dropout -> Dense(d_model) -> TransformerEncoder -> GlobalAvgPool -> Dense(25) -> Dropout -> sigmoid
@@ -181,6 +202,24 @@ tests/                      # [DONE] 47 tests (conftest, data, indicators, strat
 - `load(ticker, interval)` -> loads model+scaler+metadata from disk
 - `predict_next(df)` -> {direction: BUY/SELL, confidence: 0-1, probability: raw sigmoid}
 - `filter_signal(signal_direction, prediction)` -> {accepted: bool, reason: str}. Rejects if ML disagrees or confidence < threshold
+
+### models/xgboost_model.py - XGBoostTrader
+- Primary ML model. Tree-based, regularized, outperforms LSTM on small datasets
+- `prepare_data(df)` -> single-ticker train/test split with triple-barrier labels
+- `prepare_cross_sectional(ticker_dfs)` -> pools data from multiple tickers (Alzaman 2024, Byun 2024)
+- `train(X_train, y_train)` -> fits XGBClassifier with class weight balancing
+- `evaluate(X_test, y_test)` -> {accuracy, precision, recall}
+- `save(ticker, interval)` -> saves model.json + scaler.pkl + metadata.json to models/saved/{ticker}_{interval}_xgb/
+- `XGBoostPredictor` wrapper: `load()`, `predict_next(df)`, `filter_signal(direction, prediction)`
+- Cross-sectional model saved as `all_tickers_{interval}_xgb/`
+
+### models/ensemble_predictor.py - EnsemblePredictor
+- Combines LSTM + XGBoost predictions via voting mechanism
+- `load(ticker, interval, models=['lstm', 'xgb'])` -> loads both models
+- `predict_next(df)` -> {lstm: prediction, xgb: prediction, ensemble: consensus}
+- `_ensemble_vote(lstm_pred, xgb_pred)` -> STRONG (both agree) or WEAK (disagree)
+- `filter_signal(signal_direction, df)` -> accepts only when ensemble agrees strongly
+- Graceful degradation: works with single model if one fails to load
 
 ### config/settings.py - Cambios Fase 0
 - `LSTM_CONFIG` renombrado a `ML_CONFIG` (mismos params de entrenamiento)
@@ -253,6 +292,66 @@ PIPELINE_TICKERS_RAW = [
 - `docs/analysis/FRESH_DATA_FIX.md` - Technical analysis of fix
 - `docs/analysis/SESSION_CHANGELOG.md` - Changelog of this session
 
+## Paper Trading Automation (Windows Task Scheduler)
+
+The system runs automated paper trading via **Windows Task Scheduler** (not WSL cron).
+WSL is only started during task execution and shuts down after.
+
+### ⚠️ CRITICAL DEPENDENCIES — DO NOT RENAME OR MOVE
+
+Windows scheduled tasks call `.bat` files that invoke WSL. Changing these paths breaks automation:
+
+| Windows Side (C:\Users\alans\cfd-scripts\) | Calls |
+|---------------------------------------------|-------|
+| `run_cfd_hourly.bat` | `wsl.exe -d Ubuntu --exec bash -c "cd /home/alaindolea/proyectos/cfd-trading-system && ... python3 main.py paper-trade --interval 1h ..."` |
+| `run_cfd_daily.bat` | `wsl.exe -d Ubuntu --exec bash -c "cd /home/alaindolea/proyectos/cfd-trading-system && ... python3 main.py paper-trade --interval 1d ..."` |
+
+### Scheduled Tasks
+
+| Task Name | Schedule | Interval | Orders |
+|-----------|----------|----------|--------|
+| `CFD Paper Hourly` | Mon-Fri, every 1h, 07:00-15:59 ET | 1h | DAY (intraday, SL 0.5%, TP 1%) |
+| `CFD Paper Daily` | Mon-Fri, 07:00 ET | 1d | GTC (swing, SL 1.5%, TP 3%) |
+
+### Log Files
+
+```
+logs/paper/
+  ├── hourly_YYYY-MM-DD.log   # Hourly signal logs
+  └── daily_YYYY-MM-DD.log    # Daily swing signal logs
+```
+
+### Managing Tasks (PowerShell as Admin)
+
+```powershell
+# View tasks
+schtasks /Query /TN 'CFD*' /FO TABLE
+
+# Disable a task
+schtasks /Change /TN 'CFD Paper Hourly' /DISABLE
+
+# Enable a task
+schtasks /Change /TN 'CFD Paper Hourly' /ENABLE
+
+# Delete a task
+schtasks /Delete /TN 'CFD Paper Hourly' /F
+
+# Run task immediately
+schtasks /Run /TN 'CFD Paper Hourly'
+```
+
+### Re-setup After System Changes
+
+If tasks are lost (Windows reinstall, etc.), re-register from WSL:
+```bash
+powershell.exe -ExecutionPolicy Bypass -File /mnt/c/Users/alans/AppData/Local/Temp/setup_cfd_tasks.ps1
+```
+Or manually:
+```powershell
+schtasks /Create /TN 'CFD Paper Hourly' /TR 'C:\Users\alans\cfd-scripts\run_cfd_hourly.bat' /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 07:00 /RI 60 /DU 09:00 /F
+schtasks /Create /TN 'CFD Paper Daily' /TR 'C:\Users\alans\cfd-scripts\run_cfd_daily.bat' /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 07:00 /F
+```
+
 ## Architecture Decisions
 
 | Decision | Choice | Reason |
@@ -266,6 +365,7 @@ PIPELINE_TICKERS_RAW = [
 | Data | yfinance + CCXT | yfinance=stocks/indices, CCXT=crypto data |
 | Indicators | pandas-ta (o manual si Python 3.14) | 130+ indicadores, MIT license |
 | Plus500 | Manual execution | Plus500 NO tiene API |
+| Paper Trading | Windows Task Scheduler + WSL | Survives sleep/hibernate, auto-starts WSL |
 
 ## Do's and Don'ts
 
@@ -288,6 +388,9 @@ PIPELINE_TICKERS_RAW = [
 - ❌ NO usar `live_signals.py`, `live_signals_ensemble.py`, `live_signals_expanded.py` - DEPRECATED
   - Usar `python3 main.py pipeline` en su lugar
   - Preferir `UnifiedPipeline` sobre `SignalGenerator.generate()` para codigo nuevo
+- ❌ NO renombrar ni mover `run_cfd_hourly.bat`, `run_cfd_daily.bat` en `C:\Users\alans\cfd-scripts\`
+  - Son dependencias de Windows Task Scheduler. Cambiarlos rompe el trading automatico
+- ❌ NO modificar los entries de `schtasks` sin documentar el cambio en CLAUDE.md
 
 ## Key Libraries (Installed - Python 3.12 venv)
 | Library | Version | Use | Status |
@@ -447,6 +550,7 @@ Depends: Phase 2
 | 7 | 7 | Telegram bot | DONE |
 | 8 | 8 + 9 | Tests + final integration | DONE |
 | 10 | Audit | Auditoría y mejoras del sistema | DONE |
+| 11 | Paper Trading | Windows Task Scheduler + WSL automation | DONE |
 
 ---
 
@@ -498,6 +602,55 @@ strategy.use_atr_sl = True
 ```
 
 ### 47 tests — 100% pasando después de todos los cambios
+
+---
+
+## Cambios – Sesión 11 (2026-06-14)
+
+### Paper Trading Automation via Windows Task Scheduler
+
+**Problema**: WSL cron se apagaba cuando Windows entraba en sleep/hibernate.
+**Solución**: Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe` solo durante la ejecución.
+
+### Archivos Creados
+
+**WSL side (referencia):**
+- `run_paper_hourly.ps1` — Documentación del wrapper para señales intradiarias
+- `run_paper_daily.ps1` — Documentación del wrapper para señales swing
+- `setup_tasks.ps1` — Script de setup para Windows Task Scheduler
+
+**Windows side (dependencias críticas):**
+- `C:\Users\alans\cfd-scripts\run_cfd_hourly.bat` — Ejecuta `wsl.exe -d Ubuntu --exec bash -c "... python3 main.py paper-trade --interval 1h ..."`
+- `C:\Users\alans\cfd-scripts\run_cfd_daily.bat` — Ejecuta `wsl.exe -d Ubuntu --exec bash -c "... python3 main.py paper-trade --interval 1d ..."`
+
+### Tareas Registradas
+
+| Tarea | Horario | Intervalo | Órdenes |
+|-------|---------|-----------|---------|
+| `CFD Paper Hourly` | Lun-Vie, cada 1h, 07:00-15:59 ET | 1h | DAY (intraday, SL 0.5%, TP 1%) |
+| `CFD Paper Daily` | Lun-Vie, 07:00 ET | 1d | GTC (swing, SL 1.5%, TP 3%) |
+
+### Cambios en Configuración
+
+- `.gitignore`: Agregado `logs/paper/` para logs persistentes
+- `logs/paper/`: Directorio para logs de paper trading (hourly/daily)
+- WSL crontab: Eliminado (reemplazado por Windows Task Scheduler)
+- Scripts viejos eliminados: `run_paper_trade.sh`, `run_paper_hourly.sh`, `run_paper_daily.sh`, `reset_paper.sh`
+
+### Documentación Actualizada
+
+- `CLAUDE.md`: Sección "Paper Trading Automation" con dependencias críticas
+- `CLAUDE.md`: Tabla "Architecture Decisions" actualizada con Windows Task Scheduler
+- `CLAUDE.md`: Do's and Don'ts actualizados (no renombrar scripts .bat)
+- `docs/README.md`: Referencias a paper trading en Quick Navigation
+
+### ⚠️ DEPENDENCIAS CRÍTICAS
+
+**NO renombrar ni mover:**
+- `C:\Users\alans\cfd-scripts\run_cfd_hourly.bat`
+- `C:\Users\alans\cfd-scripts\run_cfd_daily.bat`
+
+Cambiar estos nombres/paths rompe el trading automático.
 
 ---
 
