@@ -62,7 +62,7 @@ class SignalManager:
         if not self.log_file.exists():
             return pd.DataFrame(columns=_CSV_HEADERS)
 
-        df = pd.read_csv(self.log_file)
+        df = pd.read_csv(self.log_file, on_bad_lines='warn')
         if ticker:
             df = df[df['ticker'] == ticker]
         return df.tail(n)
