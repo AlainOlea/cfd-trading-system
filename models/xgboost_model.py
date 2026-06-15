@@ -342,17 +342,6 @@ class XGBoostTrader:
         logger.info(f"Eval: acc={accuracy:.4f} prec={precision:.4f} rec={recall:.4f}")
         return metrics
 
-        metrics = {
-            'accuracy': float(accuracy),
-            'precision': float(precision),
-            'recall': float(recall),
-        }
-
-        logger.info(
-            f"Evaluation: acc={accuracy:.4f} prec={precision:.4f} rec={recall:.4f}"
-        )
-        return metrics
-
     def get_feature_importance(self) -> pd.DataFrame:
         if self.model is None:
             raise RuntimeError("Model not trained.")

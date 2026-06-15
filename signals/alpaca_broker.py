@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.requests import MarketOrderRequest, StopOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 
 logger = logging.getLogger(__name__)
@@ -140,12 +140,14 @@ class AlpacaBroker:
 
         return shares
 
-    def place_signal(self, signal) -> TradeResult:
+    def place_signal(self, signal, interval: str = '1h') -> TradeResult:
         """Execute a trading signal as a bracket order on Alpaca paper.
 
         Args:
             signal: Signal dataclass with direction, ticker, entry_price,
                     stop_loss, take_profit, confidence.
+            interval: '1d' for swing (GTC, 2x SL/TP), '1h' for intraday (DAY).
+                      Default '1h' for backward compatibility.
 
         Returns:
             TradeResult with execution status.
@@ -179,6 +181,10 @@ class AlpacaBroker:
             return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
                                False, "Zero shares calculated")
 
+        # Widen SL/TP for swing trades (1d signals inherit 1h-tight levels from strategies)
+        if interval == '1d':
+            sl, tp = self._widen_sl_tp_for_swing(entry, sl, tp, direction)
+
         try:
             is_crypto = _is_crypto(symbol)
 
@@ -205,10 +211,57 @@ class AlpacaBroker:
                     side=side,
                     time_in_force=TimeInForce.GTC,
                 )
-                self.trading.submit_order(order)
+                submitted = self.trading.submit_order(order)
                 logger.info(f"CRYPTO {direction} {alpaca_symbol}: ${notional:.0f} notional @ ~{entry:.2f}")
-                return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
-                                   True, f"Crypto: ${notional:,.0f} {direction} (SL=${sl:.2f} TP=${tp:.2f})")
+
+                # Place separate SL/TP orders after fill (Alpaca limitation: no bracket for notional)
+                import time as _time
+                filled_order = submitted
+                for _ in range(15):
+                    _time.sleep(1)
+                    filled_order = self.trading.get_order(submitted.id)
+                    if filled_order.status in ('filled', 'expired', 'canceled'):
+                        break
+
+                if filled_order.status == 'filled' and filled_order.filled_qty:
+                    filled_qty = float(filled_order.filled_qty)
+                    filled_price = float(filled_order.filled_avg_price or entry)
+
+                    # Place stop-loss order
+                    try:
+                        sl_req = StopOrderRequest(
+                            symbol=alpaca_symbol,
+                            qty=filled_qty,
+                            side=OrderSide.SELL,
+                            stop_price=round(sl, 2),
+                            time_in_force=TimeInForce.GTC,
+                        )
+                        self.trading.submit_order(sl_req)
+                        logger.info(f"CRYPTO SL: {filled_qty} {alpaca_symbol} @ stop={sl:.2f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to place crypto SL: {e}")
+
+                    # Place take-profit limit order
+                    try:
+                        tp_req = LimitOrderRequest(
+                            symbol=alpaca_symbol,
+                            qty=filled_qty,
+                            side=OrderSide.SELL,
+                            limit_price=round(tp, 2),
+                            time_in_force=TimeInForce.GTC,
+                        )
+                        self.trading.submit_order(tp_req)
+                        logger.info(f"CRYPTO TP: {filled_qty} {alpaca_symbol} @ limit={tp:.2f}")
+                    except Exception as e:
+                        logger.warning(f"Failed to place crypto TP: {e}")
+
+                    return TradeResult(symbol, direction, filled_qty, filled_price, sl, tp, conf,
+                                       True, f"Crypto: {filled_qty:.4f} units, SL/TP placed")
+                else:
+                    status = filled_order.status if hasattr(filled_order, 'status') else 'unknown'
+                    logger.warning(f"Crypto order status: {status}")
+                    return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                                       True, f"Crypto order submitted (status={status})")
             else:
                 # Stocks/ETFs: whole shares with bracket order for auto SL/TP
                 qty = max(1, round(shares))
@@ -232,24 +285,51 @@ class AlpacaBroker:
                 except Exception:
                     pass
                 precision = 4 if tp < 1.0 else 2
+                # Swing trades (1d) use GTC and 2x wider SL/TP to absorb daily volatility
+                tif = TimeInForce.GTC if interval == '1d' else TimeInForce.DAY
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
                     qty=qty,
                     side=side,
-                    time_in_force=TimeInForce.DAY,
+                    time_in_force=tif,
                     order_class=OrderClass.BRACKET,
                     take_profit={'limit_price': round(tp, precision)},
                     stop_loss={'stop_price': round(sl, precision)},
                 )
                 self.trading.submit_order(order)
-                logger.info(f"BRACKET {direction} {qty} {alpaca_symbol} @ ~{entry:.2f} | SL={sl:.2f} TP={tp:.2f}")
+                logger.info(f"BRACKET {direction} {qty} {alpaca_symbol} @ ~{entry:.2f} | "
+                            f"SL={sl:.2f} TP={tp:.2f} | tif={tif.value} | interval={interval}")
                 return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
-                                   True, f"Bracket: {direction} {qty} sh")
+                                   True, f"Bracket ({interval}): {direction} {qty} sh")
 
         except Exception as e:
             logger.error(f"Order failed for {symbol}: {e}")
             return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
                                False, str(e))
+
+    @staticmethod
+    def _widen_sl_tp_for_swing(entry: float, sl: float, tp: float, direction: str) -> tuple[float, float]:
+        """Widen SL/TP for 1d swing trades.
+
+        Strategies built for 1h produce tight 0.5%/1% levels. For daily bars
+        that would be stopped out by intraday noise. We expand to a floor of
+        1.5% SL and 3% TP, preserving the original risk/reward ratio.
+        """
+        if direction == 'BUY':
+            sl_pct = abs(entry - sl) / entry if entry > 0 else 0
+            tp_pct = abs(tp - entry) / entry if entry > 0 else 0
+            if sl_pct < 0.015 or tp_pct < 0.03:
+                new_sl = entry * (1 - 0.015)
+                new_tp = entry * (1 + 0.03) if tp_pct >= sl_pct else entry * (1 + 0.03)
+                return new_sl, new_tp
+        elif direction == 'SELL':
+            sl_pct = abs(sl - entry) / entry if entry > 0 else 0
+            tp_pct = abs(entry - tp) / entry if entry > 0 else 0
+            if sl_pct < 0.015 or tp_pct < 0.03:
+                new_sl = entry * (1 + 0.015)
+                new_tp = entry * (1 - 0.03)
+                return new_sl, new_tp
+        return sl, tp
 
     def close_position(self, symbol: str) -> TradeResult:
         try:
@@ -288,82 +368,98 @@ class AlpacaBroker:
         return results
 
     def get_trade_history(self, days: int = 30) -> list[dict]:
-        """Get filled orders with calculated P&L.
+        """Get closed trades with calculated P&L.
 
-        Groups bracket orders to compute entry-to-exit profit per trade.
+        Alpaca flattens bracket orders into 3 separate orders (entry MARKET,
+        TP LIMIT, SL STOP). We pair them heuristically: for each filled MARKET
+        order, find the next filled order of opposite side with matching qty
+        within a 24h window.
         """
         from datetime import datetime, timedelta
         from alpaca.trading.requests import GetOrdersRequest
         from alpaca.trading.enums import QueryOrderStatus
 
         after = datetime.now() - timedelta(days=days)
-        filled_req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=500, after=after)
-        all_orders = self.trading.get_orders(filter=filled_req)
+        req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=500, after=after)
+        orders = self.trading.get_orders(filter=req)
+
+        filled = []
+        for o in orders:
+            if o.filled_avg_price is None or float(o.filled_qty or 0) <= 0:
+                continue
+            filled.append({
+                'symbol': o.symbol,
+                'side': str(o.side),
+                'qty': float(o.filled_qty or o.qty or 0),
+                'price': float(o.filled_avg_price),
+                'type': str(o.type),
+                'filled_at': o.filled_at,
+            })
+
+        by_symbol: dict[str, list[dict]] = {}
+        for o in filled:
+            by_symbol.setdefault(o['symbol'], []).append(o)
+        for sym in by_symbol:
+            by_symbol[sym].sort(key=lambda x: x['filled_at'])
 
         trades = []
-        for o in all_orders:
-            if o.order_class == OrderClass.BRACKET and o.legs:
-                trade = self._parse_bracket_trade(o)
-                if trade:
-                    trades.append(trade)
-            elif o.filled_avg_price and float(o.filled_qty or 0) > 0:
-                qty = float(o.filled_qty or o.qty or 0)
-                trades.append({
-                    'symbol': o.symbol,
-                    'side': str(o.side),
-                    'qty': qty,
-                    'entry': float(o.filled_avg_price),
-                    'exit': 0.0,
-                    'pnl': 0.0,
-                    'pnl_pct': 0.0,
-                    'filled_at': str(o.filled_at),
-                    'type': 'manual',
-                })
-
-        return sorted(trades, key=lambda t: t.get('filled_at', ''))
-
-    def _parse_bracket_trade(self, parent_order) -> dict | None:
-        """Extract entry and exit from a bracket order."""
-        try:
-            entry_leg = parent_order
-            entry_price = float(entry_leg.filled_avg_price or 0)
-            entry_qty = float(entry_leg.filled_qty or 0)
-            if entry_price <= 0 or entry_qty <= 0:
-                return None
-
-            exit_price = 0.0
-            exit_side = None
-            for leg in parent_order.legs:
-                if leg.filled_avg_price and float(leg.filled_qty or 0) > 0:
-                    exit_price = float(leg.filled_avg_price)
-                    exit_side = str(leg.side)
+        for sym, lst in by_symbol.items():
+            i = 0
+            while i < len(lst):
+                entry = lst[i]
+                exit_ord = None
+                exit_idx = -1
+                for j in range(i + 1, len(lst)):
+                    cand = lst[j]
+                    if cand['side'] == entry['side']:
+                        continue
+                    qty_ref = max(entry['qty'], 1e-9)
+                    if abs(cand['qty'] - entry['qty']) / qty_ref > 0.05:
+                        continue
+                    delta_s = (cand['filled_at'] - entry['filled_at']).total_seconds()
+                    if delta_s > 86400 or delta_s < 0:
+                        continue
+                    exit_ord = cand
+                    exit_idx = j
                     break
 
-            if exit_price <= 0:
-                return None
+                if exit_ord is None:
+                    i += 1
+                    continue
 
-            if entry_leg.side == OrderSide.BUY:
-                pnl = (exit_price - entry_price) * entry_qty
-                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
-            else:
-                pnl = (entry_price - exit_price) * entry_qty
-                pnl_pct = ((entry_price - exit_price) / entry_price) * 100
+                is_long = 'BUY' in entry['side']
+                if is_long:
+                    pnl = (exit_ord['price'] - entry['price']) * entry['qty']
+                    pnl_pct = (exit_ord['price'] - entry['price']) / entry['price'] * 100
+                else:
+                    pnl = (entry['price'] - exit_ord['price']) * entry['qty']
+                    pnl_pct = (entry['price'] - exit_ord['price']) / entry['price'] * 100
 
-            return {
-                'symbol': entry_leg.symbol,
-                'side': str(entry_leg.side),
-                'qty': entry_qty,
-                'entry': entry_price,
-                'exit': exit_price,
-                'pnl': round(pnl, 2),
-                'pnl_pct': round(pnl_pct, 2),
-                'filled_at': str(entry_leg.filled_at),
-                'type': 'bracket',
-                'exit_type': 'TP' if exit_side != str(entry_leg.side) else 'manual',
-            }
-        except Exception as e:
-            logger.debug(f"Could not parse bracket trade: {e}")
-            return None
+                if 'LIMIT' in exit_ord['type']:
+                    exit_type = 'TP'
+                elif 'STOP' in exit_ord['type']:
+                    exit_type = 'SL'
+                else:
+                    exit_type = 'manual'
+
+                duration_min = (exit_ord['filled_at'] - entry['filled_at']).total_seconds() / 60
+
+                trades.append({
+                    'symbol': sym,
+                    'side': entry['side'].replace('OrderSide.', ''),
+                    'qty': entry['qty'],
+                    'entry': round(entry['price'], 4),
+                    'exit': round(exit_ord['price'], 4),
+                    'pnl': round(pnl, 2),
+                    'pnl_pct': round(pnl_pct, 2),
+                    'entry_at': entry['filled_at'].isoformat(),
+                    'exit_at': exit_ord['filled_at'].isoformat(),
+                    'duration_min': round(duration_min, 1),
+                    'exit_type': exit_type,
+                })
+                i = exit_idx + 1
+
+        return sorted(trades, key=lambda t: t['entry_at'])
 
     def get_performance(self, days: int = 30) -> dict:
         """Calculate performance metrics from trade history."""

@@ -852,6 +852,9 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
 @cli.command('paper-trade')
 @click.option('--category', default=None, help='Filter by category (indices, commodities, stocks, crypto)')
 @click.option('--ticker', default=None, help='Single ticker (e.g. SPY, GLD)')
+@click.option('--interval', default='all',
+              type=click.Choice(['1d', '1h', 'all']),
+              help='Timeframe to trade: 1d (swing), 1h (intraday), all (both, default)')
 @click.option('--no-ml', is_flag=True, help='Disable ML predictions')
 @click.option('--no-ensemble', is_flag=True, help='Disable ensemble voting')
 @click.option('--no-news', is_flag=True, help='Disable news sentiment')
@@ -860,7 +863,7 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
 @click.option('--min-confidence', default=60.0, type=float, help='Min confidence % to trade')
 @click.option('--close-all', is_flag=True, help='Close all open paper positions first')
 @click.option('--dry-run', is_flag=True, help='Show what would be traded without executing')
-def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
+def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_telegram,
                 min_confluence, min_confidence, close_all, dry_run):
     """Run pipeline and auto-execute signals in Alpaca paper trading sandbox.
 
@@ -868,12 +871,15 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
     For each actionable BUY/SELL signal, places a bracket order (entry + SL + TP)
     automatically. Skips tickers you already hold.
 
+    Use --interval to run only one timeframe (recommended for cron jobs):
+      --interval 1d  : swing trades (GTC orders, 2-3% SL, 4-6% TP)
+      --interval 1h  : intraday trades (DAY orders, 0.5% SL, 1% TP)
+
     Requires ALPACA_API_KEY and ALPACA_SECRET_KEY in .env
     """
     from signals.pipeline import UnifiedPipeline
     from signals.alpaca_broker import AlpacaBroker, TradeResult
     from signals.manager import SignalManager
-    from signals.generator import Signal
     import time
 
     use_ml = not no_ml
@@ -884,6 +890,7 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
 
     click.echo(f"\n  PAPER TRADING MODE")
     click.echo(f"  {'=' * 50}")
+    click.echo(f"  Interval:        {interval} {'(swing)' if interval == '1d' else '(intraday)' if interval == '1h' else '(mixed - not recommended for cron)'}")
     click.echo(f"  Min confluence:  {min_confluence}/5 stars")
     click.echo(f"  Min confidence:  {min_confidence:.0f}%")
     click.echo(f"  Dry run:         {'YES (no orders placed)' if dry_run else 'No (live paper trades)'}")
@@ -923,7 +930,11 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
         use_ml=use_ml, use_ensemble=use_ensemble,
         use_news=use_news, send_telegram=send_telegram
     )
-    results = pipeline.run_all(category=category, ticker_filter=ticker)
+    results = pipeline.run_all(
+        category=category,
+        ticker_filter=ticker,
+        interval_filter=interval if interval != 'all' else None,
+    )
     actionable = [r for r in results if r.is_actionable()]
 
     # Send Telegram only for quality signals (3+ stars, before trade filter)
@@ -955,6 +966,25 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
             skipped += 1
             continue
 
+        # Signal cooldown: skip if same ticker+direction traded recently
+        cooldown_hours = 4 if r.interval == '1h' else 24
+        recent_signals = manager.get_history(ticker=r.ticker, n=10)
+        if recent_signals is not None and not recent_signals.empty:
+            from datetime import datetime, timedelta
+            cutoff = datetime.now() - timedelta(hours=cooldown_hours)
+            recent_signals['ts'] = pd.to_datetime(recent_signals['timestamp'], errors='coerce')
+            recent_same = recent_signals[
+                (recent_signals['direction'] == r.technical_signal.direction) &
+                (recent_signals['ts'] > cutoff)
+            ]
+            if not recent_same.empty:
+                skipped += 1
+                click.echo(
+                    f"  [SKIP] {r.ticker} {r.technical_signal.direction} — "
+                    f"cooldown ({cooldown_hours}h since last signal)"
+                )
+                continue
+
         if dry_run:
             dry_count += 1
             shares = broker.calculate_shares(
@@ -971,7 +1001,7 @@ def paper_trade(category, ticker, no_ml, no_ensemble, no_news, no_telegram,
                 f"shares={shares:.2f}"
             )
         else:
-            result = broker.place_signal(r.technical_signal)
+            result = broker.place_signal(r.technical_signal, interval=r.interval)
             trades.append(result)
             status = "+" if result.placed else "x"
             click.echo(
@@ -1075,8 +1105,13 @@ def paper_close(symbol):
 
 @cli.command('paper-history')
 @click.option('--days', default=30, type=int, help='Days of history to show')
-def paper_history(days):
+@click.option('--csv', 'csv_path', type=click.Path(), default=None,
+              help='Export trades to CSV file (e.g. results/paper_trades.csv)')
+@click.option('--all', 'show_all', is_flag=True,
+              help='Show all trades, not just the last 20')
+def paper_history(days, csv_path, show_all):
     """Show paper trading performance: trades, win rate, P&L."""
+    import csv
     from signals.alpaca_broker import AlpacaBroker
 
     broker = AlpacaBroker()
@@ -1087,10 +1122,23 @@ def paper_history(days):
     perf = broker.get_performance(days)
     trades = broker.get_trade_history(days)
 
+    if csv_path:
+        if not trades:
+            click.echo(f"  No trades to export.")
+            return
+        fieldnames = ['symbol', 'side', 'qty', 'entry', 'exit', 'pnl',
+                      'pnl_pct', 'exit_type', 'duration_min', 'entry_at', 'exit_at']
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(trades)
+        click.echo(f"  Exported {len(trades)} trades -> {csv_path}")
+        return
+
     click.echo(f"\n  PAPER TRADING PERFORMANCE (last {days} days)")
     click.echo(f"  {'=' * 50}")
 
-    if perf['trades'] == 0:
+    if not trades:
         click.echo(f"\n  No closed trades yet. Paper trading is just getting started.")
         click.echo(f"  Trades will appear here once your bracket orders execute.\n")
         return
@@ -1108,14 +1156,21 @@ def paper_history(days):
     if perf['profit_factor'] > 0:
         click.echo(f"  Profit factor:   {perf['profit_factor']:.2f}")
 
-    click.echo(f"\n  Recent closed trades:")
-    click.echo(f"  {'Symbol':<8} {'Side':<6} {'Qty':>6} {'Entry':>10} {'Exit':>10} {'P&L':>10} {'P&L%':>8}")
-    click.echo(f"  {'─'*8} {'─'*6} {'─'*6} {'─'*10} {'─'*10} {'─'*10} {'─'*8}")
-    for t in trades[-20:]:
+    tp_count = sum(1 for t in trades if t['exit_type'] == 'TP')
+    sl_count = sum(1 for t in trades if t['exit_type'] == 'SL')
+    click.echo(f"  Exits:           {tp_count} TP / {sl_count} SL")
+
+    display = trades if show_all else trades[-20:]
+    click.echo(f"\n  Closed trades{' (all)' if show_all else ' (last 20)'}:")
+    click.echo(f"  {'Symbol':<8} {'Side':<5} {'Qty':>7} {'Entry':>10} {'Exit':>10} "
+               f"{'P&L':>10} {'P&L%':>8} {'Exit':>5} {'Min':>6}")
+    click.echo(f"  {'─'*8} {'─'*5} {'─'*7} {'─'*10} {'─'*10} {'─'*10} {'─'*8} {'─'*5} {'─'*6}")
+    for t in display:
         pnl_s = f"${t['pnl']:+,.2f}"
-        click.echo(f"  {t['symbol']:<8} {t['side']:<6} {t['qty']:>6.0f} "
+        click.echo(f"  {t['symbol']:<8} {t['side']:<5} {t['qty']:>7.2f} "
                    f"${t['entry']:>9.2f} ${t['exit']:>9.2f} "
-                   f"{pnl_s:>10} {t['pnl_pct']:>+7.2f}%")
+                   f"{pnl_s:>10} {t['pnl_pct']:>+7.2f}% "
+                   f"{t['exit_type']:>5} {t['duration_min']:>6.1f}")
 
 
 def _is_market_open(now: datetime, hours: dict) -> bool:

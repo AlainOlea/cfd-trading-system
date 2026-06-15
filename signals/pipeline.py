@@ -159,6 +159,7 @@ class UnifiedPipeline:
         configs: list[TickerConfig] | None = None,
         category: str | None = None,
         ticker_filter: str | None = None,
+        interval_filter: str | None = None,
     ) -> list[PipelineResult]:
         """Execute pipeline for all configured tickers.
 
@@ -166,6 +167,8 @@ class UnifiedPipeline:
             configs: List of TickerConfig. If None, uses PIPELINE_TICKERS from settings.
             category: Filter by category ('indices', 'stocks', 'crypto', 'commodities').
             ticker_filter: Run for a specific ticker only.
+            interval_filter: Restrict to a single interval ('1d' or '1h'). If None, uses
+                all intervals configured per ticker.
 
         Returns:
             List of all PipelineResult objects.
@@ -178,6 +181,17 @@ class UnifiedPipeline:
             configs = [c for c in configs if c.category == category]
         if ticker_filter:
             configs = [c for c in configs if c.ticker == ticker_filter]
+        if interval_filter:
+            configs = [
+                TickerConfig(
+                    ticker=c.ticker, category=c.category,
+                    intervals=[interval_filter],
+                    strategies=c.strategies, use_ml=c.use_ml,
+                    use_ensemble=c.use_ensemble, use_news=c.use_news,
+                    confluence_min_stars=c.confluence_min_stars,
+                )
+                for c in configs if interval_filter in c.intervals
+            ]
 
         all_results: list[PipelineResult] = []
 
@@ -268,6 +282,11 @@ class UnifiedPipeline:
                     best_signal.direction == 'HOLD' or signal.confidence > best_signal.confidence
                 ):
                     best_signal = signal
+
+                # Dedup: once we have an actionable signal, skip remaining strategies
+                # to avoid double-firing (e.g. MACD+VWAP and RSI+BB on same condition)
+                if best_signal.direction != 'HOLD':
+                    break
             except Exception as e:
                 logger.warning(f"Strategy {strategy_name} failed for {config.ticker} {interval}: {e}")
 
