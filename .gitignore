@@ -33,6 +33,7 @@ data/processed/*.csv
 logs/*.csv
 logs/*.txt
 *.log
+logs/paper/
 
 # Models (too large — ignore everything in saved/)
 models/saved/
