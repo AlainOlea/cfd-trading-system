@@ -50,7 +50,7 @@ TICKERS = {
 }
 
 # Default tickers for testing (expanded)
-DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'DOGE-USD', 'XRP-USD']
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD']
 
 # ============================================
 # TIMEFRAMES & DATES
@@ -429,7 +429,6 @@ PIPELINE_TICKERS_RAW = [
     ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     ('ETH-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     ('SOL-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, False, 2),
-    ('DOGE-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
     ('XRP-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
 ]
 

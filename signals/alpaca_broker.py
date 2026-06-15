@@ -22,7 +22,7 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 logger = logging.getLogger(__name__)
 
 ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA'}
-ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD', 'DOGE-USD': 'DOGE/USD', 'XRP-USD': 'XRP/USD'}
+ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD', 'XRP-USD': 'XRP/USD'}
 DEFAULT_RISK_CAPITAL = 2000.0  # 2% of $100k
 MAX_POSITION_PCT = 0.05       # 5% max per position (~$5k)
 MIN_POSITION_VALUE = 100.0    # Don't bother with trades smaller than $100
