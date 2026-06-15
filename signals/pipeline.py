@@ -147,7 +147,7 @@ class UnifiedPipeline:
                 logger.error(f"Pipeline error for {config.ticker} {interval}: {e}\n{traceback.format_exc()}")
 
         # Compute multi-timeframe confluence across all intervals
-        if len(results) > 1:
+        if results:
             confluence = self._compute_confluence(results)
             for r in results:
                 r.confluence_score = confluence
