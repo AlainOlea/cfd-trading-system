@@ -388,7 +388,7 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
 @cli.command('train-xgb-cross')
 @click.option('--interval', default='1d', type=click.Choice(['1d', '1h']),
               help='Data interval')
-@click.option('--tickers', default='SPY,QQQ,IWM,GLD,AAPL,NVDA,MSFT',
+@click.option('--tickers', default='SPY,QQQ,IWM,DIA,GLD,SLV,USO,UNG,AAPL,NVDA,MSFT,AMZN,GOOGL,META,TSLA,BTC-USD,ETH-USD,SOL-USD,XRP-USD',
               help='Comma-separated tickers to pool for cross-sectional training')
 @click.option('--no-triple-barrier', is_flag=True,
               help='Use simple next-bar direction instead of triple barrier labels')
@@ -479,7 +479,7 @@ def train_xgb_cross(interval, tickers, no_triple_barrier, from_csv):
 
 @cli.command('fetch-all-history')
 @click.option('--years', default=5, type=int, help='Years of daily data to fetch')
-@click.option('--tickers', default='SPY,QQQ,IWM,GLD,AAPL,NVDA,MSFT',
+@click.option('--tickers', default='SPY,QQQ,IWM,DIA,GLD,SLV,USO,UNG,AAPL,NVDA,MSFT,AMZN,GOOGL,META,TSLA,BTC-USD,ETH-USD,SOL-USD,XRP-USD',
               help='Comma-separated tickers')
 def fetch_all_history(years, tickers):
     """Fetch extended historical data for training (bypasses yfinance limits).
