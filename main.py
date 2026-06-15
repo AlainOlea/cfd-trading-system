@@ -859,7 +859,7 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
 @click.option('--no-ensemble', is_flag=True, help='Disable ensemble voting')
 @click.option('--no-news', is_flag=True, help='Disable news sentiment')
 @click.option('--no-telegram', is_flag=True, help='Disable Telegram notifications')
-@click.option('--min-confluence', default=2, type=int, help='Min confluence stars to trade (1-5)')
+@click.option('--min-confluence', default=3, type=int, help='Min confluence stars to trade (1-5)')
 @click.option('--min-confidence', default=60.0, type=float, help='Min confidence % to trade')
 @click.option('--close-all', is_flag=True, help='Close all open paper positions first')
 @click.option('--dry-run', is_flag=True, help='Show what would be traded without executing')

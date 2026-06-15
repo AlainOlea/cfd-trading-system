@@ -626,8 +626,7 @@ class UnifiedPipeline:
     def format_telegram_message(self, result: PipelineResult) -> str:
         """Format a PipelineResult for Telegram notification.
 
-        Uses Telegram MarkdownV1-safe formatting: backticks for values,
-        avoids unmatched * and special chars in dynamic content.
+        Uses Telegram HTML-safe formatting for reliable rendering.
         """
         stars_emoji = '\u2b50' * result.confluence_score
         direction_emoji = '\U0001f7e2' if result.final_direction == 'BUY' else '\U0001f534'
@@ -637,32 +636,32 @@ class UnifiedPipeline:
         rr_str = f"1:{rr:.1f}" if rr else "N/A"
 
         lines = [
-            f"{direction_emoji} *{result.final_direction}* - `{result.ticker}`",
-            f"Strategy: `{sig.strategy}` ({result.interval})",
+            f"{direction_emoji} <b>{result.final_direction}</b> - <code>{result.ticker}</code>",
+            f"Strategy: <code>{sig.strategy}</code> ({result.interval})",
             f"Confluence: {stars_emoji} ({result.confluence_score}/5)",
             "",
-            f"Entry:  `${sig.entry_price:,.2f}`",
+            f"Entry:  <code>${sig.entry_price:,.2f}</code>",
         ]
 
         if sig.stop_loss:
-            lines.append(f"SL:     `${sig.stop_loss:,.2f}`")
+            lines.append(f"SL:     <code>${sig.stop_loss:,.2f}</code>")
         if sig.take_profit:
-            lines.append(f"TP:     `${sig.take_profit:,.2f}`")
+            lines.append(f"TP:     <code>${sig.take_profit:,.2f}</code>")
 
-        lines.append(f"R/R:    `{rr_str}`")
-        lines.append(f"Conf:   `{result.final_confidence:.0%}`")
+        lines.append(f"R/R:    <code>{rr_str}</code>")
+        lines.append(f"Conf:   <code>{result.final_confidence:.0%}</code>")
 
         # Layers summary
         if result.ml_prediction:
             lines.append(
-                f"ML:     `{result.ml_prediction['direction']} "
-                f"({result.ml_prediction['confidence']:.0%})`"
+                f"ML:     <code>{result.ml_prediction['direction']} "
+                f"({result.ml_prediction['confidence']:.0%})</code>"
             )
         if result.ensemble_result:
             ens = result.ensemble_result
             lines.append(
-                f"Ensemble: `{ens.get('direction', 'N/A')} "
-                f"({ens.get('consensus', 'N/A')})`"
+                f"Ensemble: <code>{ens.get('direction', 'N/A')} "
+                f"({ens.get('consensus', 'N/A')})</code>"
             )
 
         # News context
@@ -676,7 +675,7 @@ class UnifiedPipeline:
             except Exception:
                 pass
 
-        lines.append(f"\n_{result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}_")
+        lines.append(f"\n<i>{result.timestamp.strftime('%Y-%m-%d %H:%M:%S')}</i>")
 
         return "\n".join(lines)
 

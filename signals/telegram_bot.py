@@ -82,10 +82,10 @@ class TelegramNotifier:
                 loop.run_until_complete(bot.send_message(
                     chat_id=self.chat_id,
                     text=text,
-                    parse_mode='Markdown',
+                    parse_mode='HTML',
                 ))
             except Exception:
-                # Fallback: retry without Markdown if parsing fails
+                # Fallback: retry without parse mode if HTML parsing fails
                 loop = asyncio.new_event_loop()
                 loop.run_until_complete(bot.send_message(
                     chat_id=self.chat_id,
@@ -101,21 +101,21 @@ class TelegramNotifier:
 
     @staticmethod
     def _format_signal_message(signal: Signal) -> str:
-        """Format a signal as a Markdown message for Telegram.
+        """Format a signal as an HTML message for Telegram.
 
         Args:
             signal: Signal object.
 
         Returns:
-            Markdown-formatted string.
+            HTML-formatted string.
         """
         if signal.direction == 'HOLD':
             return (
-                f"*HOLD* - No action\n"
-                f"Strategy: `{signal.strategy}`\n"
-                f"Ticker: `{signal.ticker}` ({signal.interval})\n"
+                f"<b>HOLD</b> - No action\n"
+                f"Strategy: <code>{signal.strategy}</code>\n"
+                f"Ticker: <code>{signal.ticker}</code> ({signal.interval})\n"
                 f"Price: ${signal.entry_price:,.2f}\n"
-                f"_{signal.timestamp.strftime('%Y-%m-%d %H:%M:%S')}_"
+                f"<i>{signal.timestamp.strftime('%Y-%m-%d %H:%M:%S')}</i>"
             )
 
         emoji = '🟢' if signal.direction == 'BUY' else '🔴'
@@ -123,20 +123,20 @@ class TelegramNotifier:
         rr_str = f"{rr:.1f}" if rr else "N/A"
 
         lines = [
-            f"{emoji} *{signal.direction}* - `{signal.ticker}`",
-            f"Strategy: `{signal.strategy}` ({signal.interval})",
+            f"{emoji} <b>{signal.direction}</b> - <code>{signal.ticker}</code>",
+            f"Strategy: <code>{signal.strategy}</code> ({signal.interval})",
             "",
-            f"Entry:  `${signal.entry_price:,.2f}`",
-            f"SL:     `${signal.stop_loss:,.2f}`",
-            f"TP:     `${signal.take_profit:,.2f}`",
-            f"R/R:    `{rr_str}`",
-            f"Conf:   `{signal.confidence:.0%}`",
+            f"Entry:  <code>${signal.entry_price:,.2f}</code>",
+            f"SL:     <code>${signal.stop_loss:,.2f}</code>",
+            f"TP:     <code>${signal.take_profit:,.2f}</code>",
+            f"R/R:    <code>{rr_str}</code>",
+            f"Conf:   <code>{signal.confidence:.0%}</code>",
         ]
 
         if signal.ml_filtered:
             ml_conf = f"{signal.ml_confidence:.0%}" if signal.ml_confidence else "N/A"
-            lines.append(f"ML:     `{ml_conf}`")
+            lines.append(f"ML:     <code>{ml_conf}</code>")
 
-        lines.append(f"\n_{signal.timestamp.strftime('%Y-%m-%d %H:%M:%S')}_")
+        lines.append(f"\n<i>{signal.timestamp.strftime('%Y-%m-%d %H:%M:%S')}</i>")
 
         return "\n".join(lines)
