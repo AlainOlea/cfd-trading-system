@@ -5,7 +5,6 @@ Sends trading signals and alerts via Telegram bot.
 Graceful degradation if Telegram is not configured.
 """
 
-import asyncio
 import logging
 
 from config.settings import TELEGRAM_ALERTS_ENABLED, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
@@ -26,19 +25,11 @@ class TelegramNotifier:
         self.bot_token = bot_token
         self.chat_id = chat_id
         self.enabled = enabled
-        self._bot = None
 
     @property
     def is_configured(self) -> bool:
         """Check if Telegram credentials are set."""
         return bool(self.bot_token and self.chat_id)
-
-    def _get_bot(self):
-        """Lazy-load the Telegram bot."""
-        if self._bot is None:
-            from telegram import Bot
-            self._bot = Bot(token=self.bot_token)
-        return self._bot
 
     def send_signal(self, signal: Signal) -> bool:
         """Send a trading signal via Telegram.
@@ -74,19 +65,23 @@ class TelegramNotifier:
         return self._send_message(message)
 
     def _send_message(self, text: str) -> bool:
-        """Send a message using the Telegram bot (async wrapper)."""
+        """Send a message using httpx (sync, no event loop)."""
+        import httpx
+
+        if not self.bot_token or not self.chat_id:
+            return False
+
+        url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         try:
-            bot = self._get_bot()
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(bot.send_message(
-                    chat_id=self.chat_id,
-                    text=text,
-                ))
+            resp = httpx.post(url, json={
+                "chat_id": self.chat_id,
+                "text": text,
+            }, timeout=10)
+            if resp.status_code == 200:
                 logger.info("Telegram message sent successfully")
                 return True
-            finally:
-                loop.close()
+            logger.error(f"Telegram API error {resp.status_code}: {resp.text}")
+            return False
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             return False

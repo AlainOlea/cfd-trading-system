@@ -9,7 +9,8 @@ Zero real money. $100k virtual capital. Perfect for testing signals.
 
 import logging
 import os
-from dataclasses import dataclass
+import time as _time
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
@@ -23,9 +24,25 @@ logger = logging.getLogger(__name__)
 
 ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA'}
 ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD', 'XRP-USD': 'XRP/USD'}
-DEFAULT_RISK_CAPITAL = 2000.0  # 2% of $100k
-MAX_POSITION_PCT = 0.05       # 5% max per position (~$5k)
 MIN_POSITION_VALUE = 100.0    # Don't bother with trades smaller than $100
+
+# Risk limits from config
+try:
+    from config.settings import (
+        RISK_PER_TRADE, MAX_POSITION_PCT, MAX_GROSS_EXPOSURE, MAX_NAME_EXPOSURE,
+        MAX_CONCURRENT_POSITIONS, DRAWDOWN_WARNING_PCT, DRAWDOWN_HALT_PCT,
+        CRYPTO_MAX_AGGREGATE, CRYPTO_MAX_SINGLE,
+    )
+except ImportError:
+    RISK_PER_TRADE = 0.02
+    MAX_POSITION_PCT = 0.05
+    MAX_GROSS_EXPOSURE = 0.30
+    MAX_NAME_EXPOSURE = 0.10
+    MAX_CONCURRENT_POSITIONS = 3
+    DRAWDOWN_WARNING_PCT = 0.05
+    DRAWDOWN_HALT_PCT = 0.10
+    CRYPTO_MAX_AGGREGATE = 0.10
+    CRYPTO_MAX_SINGLE = 0.03
 
 
 def _to_alpaca_symbol(ticker: str) -> str:
@@ -40,7 +57,8 @@ def _is_stock(ticker: str) -> bool:
 
 
 def _is_crypto(ticker: str) -> bool:
-    return ticker in ALPACA_CRYPTO
+    # Check both formats: 'BTC-USD' (our format) and 'BTCUSD' (Alpaca without slash)
+    return ticker in ALPACA_CRYPTO or ticker.replace('/', '') in {''.join(k.split('-')) for k in ALPACA_CRYPTO}
 
 
 @dataclass
@@ -63,6 +81,8 @@ class AlpacaBroker:
         self.api_key = os.getenv('ALPACA_API_KEY', '')
         self.secret_key = os.getenv('ALPACA_SECRET_KEY', '')
         self._trading: TradingClient | None = None
+        self._session_high_equity: float = 0.0
+        self._halted: bool = False
 
     @property
     def is_configured(self) -> bool:
@@ -97,6 +117,7 @@ class AlpacaBroker:
                     'qty': float(p.qty),
                     'avg_entry': float(p.avg_entry_price),
                     'current_price': float(p.current_price),
+                    'market_value': abs(float(p.market_value)),
                     'unrealized_pl': float(p.unrealized_pl),
                     'unrealized_pl_pct': float(p.unrealized_plpc),
                 }
@@ -107,34 +128,130 @@ class AlpacaBroker:
     def has_position(self, symbol: str) -> bool:
         return symbol in self.get_open_positions()
 
+    # ── Risk guards ──────────────────────────────────────────────────────
+
+    def _check_drawdown(self, equity: float) -> str | None:
+        """Track session high water mark and check drawdown limits."""
+        if self._session_high_equity <= 0:
+            self._session_high_equity = equity
+            return None
+
+        if equity > self._session_high_equity:
+            self._session_high_equity = equity
+
+        drawdown_pct = (self._session_high_equity - equity) / self._session_high_equity
+
+        if drawdown_pct >= DRAWDOWN_HALT_PCT:
+            self._halted = True
+            msg = (f"DRAWDOWN HALT: {drawdown_pct:.1%} from session high "
+                   f"(${self._session_high_equity:,.0f} → ${equity:,.0f}). "
+                   f"Rejecting new entries.")
+            logger.critical(msg)
+            return msg
+
+        if drawdown_pct >= DRAWDOWN_WARNING_PCT:
+            msg = (f"DRAWDOWN WARNING: {drawdown_pct:.1%} from session high "
+                   f"(${self._session_high_equity:,.0f} → ${equity:,.0f})")
+            logger.warning(msg)
+
+        return None
+
+    def _check_portfolio_risk(self, symbol: str, notional: float, equity: float) -> str | None:
+        """Check aggregate exposure, per-name limits, and concurrent position count."""
+        positions = self.get_open_positions()
+
+        # 1) Concurrent position count
+        if len(positions) >= MAX_CONCURRENT_POSITIONS:
+            return (f"MAX POSITIONS: {len(positions)}/{MAX_CONCURRENT_POSITIONS} "
+                    f"already open. Rejecting {symbol}.")
+
+        # 2) Aggregate exposure
+        total_exposure = sum(p['market_value'] for p in positions.values())
+        new_total = total_exposure + notional
+        gross_pct = new_total / equity if equity > 0 else 0
+        if gross_pct > MAX_GROSS_EXPOSURE:
+            return (f"GROSS EXPOSURE: {gross_pct:.1%} would exceed {MAX_GROSS_EXPOSURE:.0%} limit "
+                    f"(${new_total:,.0f} / ${equity:,.0f}). Rejecting {symbol}.")
+
+        # 3) Per-name exposure
+        existing = positions.get(symbol, {}).get('market_value', 0)
+        name_total = existing + notional
+        name_pct = name_total / equity if equity > 0 else 0
+        limit = CRYPTO_MAX_SINGLE if _is_crypto(symbol.replace('/', '')) else MAX_NAME_EXPOSURE
+        if name_pct > limit:
+            return (f"NAME EXPOSURE: {symbol} would be {name_pct:.1%} (limit {limit:.0%}) "
+                    f"(${name_total:,.0f} / ${equity:,.0f}). Rejecting.")
+
+        # 4) Crypto aggregate cap
+        if _is_crypto(symbol.replace('/', '')):
+            crypto_exposure = sum(
+                v['market_value'] for k, v in positions.items()
+                if _is_crypto(k.replace('/', ''))
+            )
+            crypto_total = crypto_exposure + notional
+            crypto_pct = crypto_total / equity if equity > 0 else 0
+            if crypto_pct > CRYPTO_MAX_AGGREGATE:
+                return (f"CRYPTO EXPOSURE: {crypto_pct:.1%} would exceed {CRYPTO_MAX_AGGREGATE:.0%} "
+                        f"limit (${crypto_total:,.0f} / ${equity:,.0f}). Rejecting {symbol}.")
+
+        return None
+
+    # ── Position sizing ──────────────────────────────────────────────────
+
+    def _was_recently_attempted(self, symbol: str, direction: str, hours: int = 4) -> bool:
+        """Check if this symbol already has an open or recent order."""
+        try:
+            from alpaca.trading.requests import GetOrdersRequest
+            from alpaca.trading.enums import QueryOrderStatus
+
+            req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=100)
+            open_orders = self.trading.get_orders(filter=req)
+            for o in open_orders:
+                if o.symbol == symbol:
+                    return True
+
+            # Also check recent filled/canceled orders
+            from datetime import datetime, timedelta
+            after = datetime.now() - timedelta(hours=hours)
+            req2 = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=100, after=after)
+            recent = self.trading.get_orders(filter=req2)
+            for o in recent:
+                if o.symbol == symbol and o.side.value.upper() == direction:
+                    return True
+        except Exception as e:
+            logger.debug(f"Dedup check failed: {e}")
+        return False
+
     def calculate_shares(
         self,
         entry_price: float,
         stop_loss: float,
-        risk_capital: float = DEFAULT_RISK_CAPITAL,
-        max_position_pct: float = MAX_POSITION_PCT,
+        equity: float = 0.0,
+        is_crypto: bool = False,
     ) -> float:
-        """Calculate position size respecting risk and account limits.
+        """Calculate position size with dynamic risk capital.
 
-        Returns fractional shares for small positions, whole for larger ones.
-        Uses notional value cap to prevent single positions dominating account.
+        Uses live equity (not static dollar amount) for both risk and
+        capital caps. Crypto gets tighter limits via caller.
         """
+        if equity <= 0:
+            acct = self.get_account_summary()
+            equity = acct.get('equity', 100000)
+
+        risk_capital = equity * RISK_PER_TRADE
+
         risk_per_share = abs(entry_price - stop_loss)
         if risk_per_share <= 0:
             return 0.0
         shares_by_risk = risk_capital / risk_per_share
 
-        acct = self.get_account_summary()
-        cash = acct.get('cash', acct.get('equity', 100000))
-        max_position_value = cash * max_position_pct
+        max_pct = CRYPTO_MAX_SINGLE if is_crypto else MAX_POSITION_PCT
+        max_position_value = equity * max_pct
         shares_by_capital = max_position_value / entry_price
 
         shares = min(shares_by_risk, shares_by_capital)
-
-        # Round to 4 decimals for fractional shares
         shares = round(shares, 4)
 
-        # Don't trade if position value would be less than $100
         if shares * entry_price < MIN_POSITION_VALUE:
             return 0.0
 
@@ -172,11 +289,25 @@ class AlpacaBroker:
             return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
                                False, f"Already holding {symbol}")
 
+        # Dedup: skip if same signal was already placed in the last 4 hours
+        if self._was_recently_attempted(symbol, direction, hours=4):
+            return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                               False, f"Already attempted {direction} {symbol} in last 4h")
+
         if sl <= 0 or tp <= 0:
             return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
                                False, "Invalid SL/TP values")
 
-        shares = self.calculate_shares(entry, sl)
+        # ── Risk guard: drawdown check ──
+        acct = self.get_account_summary()
+        equity = acct.get('equity', 100000)
+        drawdown_msg = self._check_drawdown(equity)
+        if drawdown_msg:
+            return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                               False, drawdown_msg)
+
+        is_crypto = _is_crypto(symbol)
+        shares = self.calculate_shares(entry, sl, equity=equity, is_crypto=is_crypto)
         if shares <= 0:
             return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
                                False, "Zero shares calculated")
@@ -184,6 +315,51 @@ class AlpacaBroker:
         # Widen SL/TP for swing trades (1d signals inherit 1h-tight levels from strategies)
         if interval == '1d':
             sl, tp = self._widen_sl_tp_for_swing(entry, sl, tp, direction)
+
+        # Estimate notional for risk checks
+        notional = shares * entry
+
+        # ── Price alignment: re-fetch current market price ──
+        # Strategies may use stale entry prices from yfinance. Align with
+        # real market price to avoid Alpaca rejecting orders (SL/TP mismatch).
+        try:
+            latest_trade = self.trading.get_last_trade(alpaca_symbol)
+            latest_price = float(latest_trade.price)
+            if latest_price <= 0:
+                latest_price = entry
+            price_diff_pct = abs(entry - latest_price) / latest_price if latest_price > 0 else 0
+
+            if price_diff_pct > 0.05:
+                return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
+                                   False, f"Price mismatch too large: signal ${entry:.2f} "
+                                          f"vs market ${latest_price:.2f} ({price_diff_pct:.1%})")
+
+            if price_diff_pct > 0.01:
+                # Recalculate SL/TP relative to current market price
+                risk_pct = abs(entry - sl) / entry if entry > 0 else 0.005
+                reward_pct = abs(tp - entry) / entry if entry > 0 else 0.01
+                if direction == 'BUY':
+                    sl = latest_price * (1 - risk_pct)
+                    tp = latest_price * (1 + reward_pct)
+                else:
+                    sl = latest_price * (1 + risk_pct)
+                    tp = latest_price * (1 - reward_pct)
+                entry = latest_price
+                # Recalculate shares with updated entry
+                shares = self.calculate_shares(entry, sl, equity=equity, is_crypto=is_crypto)
+                if shares <= 0:
+                    return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                                       False, "Zero shares after price alignment")
+                notional = shares * entry
+                logger.info(f"Price aligned: {symbol} entry ${entry:.2f}, SL ${sl:.2f}, TP ${tp:.2f}")
+        except Exception as e:
+            logger.debug(f"Price alignment skipped for {symbol}: {e}")
+
+        # ── Risk guard: portfolio-level checks ──
+        risk_msg = self._check_portfolio_risk(alpaca_symbol, notional, equity)
+        if risk_msg:
+            return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                               False, risk_msg)
 
         try:
             is_crypto = _is_crypto(symbol)
@@ -215,11 +391,10 @@ class AlpacaBroker:
                 logger.info(f"CRYPTO {direction} {alpaca_symbol}: ${notional:.0f} notional @ ~{entry:.2f}")
 
                 # Place separate SL/TP orders after fill (Alpaca limitation: no bracket for notional)
-                import time as _time
                 filled_order = submitted
                 for _ in range(15):
                     _time.sleep(1)
-                    filled_order = self.trading.get_order(submitted.id)
+                    filled_order = self.trading.get_order_by_id(submitted.id)
                     if filled_order.status in ('filled', 'expired', 'canceled'):
                         break
 
@@ -227,7 +402,8 @@ class AlpacaBroker:
                     filled_qty = float(filled_order.filled_qty)
                     filled_price = float(filled_order.filled_avg_price or entry)
 
-                    # Place stop-loss order
+                    # Place stop-loss order — if this fails, CLOSE immediately
+                    sl_placed = False
                     try:
                         sl_req = StopOrderRequest(
                             symbol=alpaca_symbol,
@@ -237,9 +413,24 @@ class AlpacaBroker:
                             time_in_force=TimeInForce.GTC,
                         )
                         self.trading.submit_order(sl_req)
+                        sl_placed = True
                         logger.info(f"CRYPTO SL: {filled_qty} {alpaca_symbol} @ stop={sl:.2f}")
                     except Exception as e:
-                        logger.warning(f"Failed to place crypto SL: {e}")
+                        logger.error(f"FAILED TO PLACE CRYPTO SL for {alpaca_symbol}: {e}")
+                        # Safety: close position immediately to avoid naked exposure
+                        try:
+                            close_req = MarketOrderRequest(
+                                symbol=alpaca_symbol,
+                                qty=filled_qty,
+                                side=OrderSide.SELL,
+                                time_in_force=TimeInForce.GTC,
+                            )
+                            self.trading.submit_order(close_req)
+                            logger.info(f"SAFETY CLOSE {alpaca_symbol}: closed due to SL failure")
+                        except Exception as close_err:
+                            logger.critical(f"FAILED TO CLOSE {alpaca_symbol} after SL failure: {close_err}")
+                        return TradeResult(symbol, direction, filled_qty, filled_price, sl, tp, conf,
+                                           False, f"Crypto SL failed, position closed. Error: {e}")
 
                     # Place take-profit limit order
                     try:

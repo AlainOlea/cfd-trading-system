@@ -339,6 +339,53 @@ class XGBoostTrader:
             'recall': float(recall),
         }
 
+        # Per-class metrics for 3-class models (bearish=0, neutral=1, bullish=2)
+        if n_classes >= 2:
+            classes = sorted(np.unique(y_test))
+            class_names = {0: 'bearish', 1: 'neutral', 2: 'bullish'}
+            per_class = {}
+            for cls in classes:
+                name = class_names.get(cls, str(cls))
+                cls_support = int((y_test == cls).sum())
+                cls_tp = int(((y_pred == cls) & (y_test == cls)).sum())
+                cls_fp = int(((y_pred == cls) & (y_test != cls)).sum())
+                cls_fn = int(((y_test == cls) & (y_pred != cls)).sum())
+                cls_precision = cls_tp / max(cls_tp + cls_fp, 1)
+                cls_recall = cls_tp / max(cls_tp + cls_fn, 1)
+                cls_f1 = 2 * cls_precision * cls_recall / max(cls_precision + cls_recall, 1e-9)
+                per_class[name] = {
+                    'precision': round(cls_precision, 4),
+                    'recall': round(cls_recall, 4),
+                    'f1': round(cls_f1, 4),
+                    'support': cls_support,
+                }
+            metrics['per_class'] = per_class
+
+            # Class distribution (check for dominant-class accuracy inflation)
+            total = len(y_test)
+            dist = {class_names.get(c, str(c)): int((y_test == c).sum()) / total
+                    for c in classes}
+            metrics['class_distribution'] = {k: round(v, 4) for k, v in dist.items()}
+
+            # Confusion matrix
+            cm = {}
+            for true_cls in classes:
+                true_name = class_names.get(true_cls, str(true_cls))
+                cm[true_name] = {}
+                for pred_cls in classes:
+                    pred_name = class_names.get(pred_cls, str(pred_cls))
+                    cm[true_name][pred_name] = int(((y_test == true_cls) & (y_pred == pred_cls)).sum())
+            metrics['confusion_matrix'] = cm
+
+            # Dominant class baseline accuracy
+            max_class_pct = max(dist.values())
+            metrics['dominant_class_accuracy'] = round(max_class_pct, 4)
+            if accuracy < max_class_pct + 0.05:
+                logger.warning(
+                    f"Model accuracy ({accuracy:.4f}) is near or below dominant class "
+                    f"baseline ({max_class_pct:.4f}). Model may be predicting the majority class."
+                )
+
         logger.info(f"Eval: acc={accuracy:.4f} prec={precision:.4f} rec={recall:.4f}")
         return metrics
 

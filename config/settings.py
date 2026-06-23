@@ -74,7 +74,17 @@ SIGNAL_LOOKBACK_BARS = 500    # Number of bars to load for signal generation
 # ============================================
 
 INITIAL_CAPITAL = 10000        # Starting capital in USD
-RISK_PER_TRADE = 0.02          # 2% risk per trade
+RISK_PER_TRADE = 0.02          # 2% risk per trade (dynamic: recomputed from live equity per order)
+
+# Portfolio risk limits (enforced by AlpacaBroker.place_signal)
+MAX_POSITION_PCT = 0.05        # 5% max per single position (of equity)
+MAX_GROSS_EXPOSURE = 0.30      # 30% max total open exposure (sum of all positions)
+MAX_NAME_EXPOSURE = 0.10       # 10% max per single name
+MAX_CONCURRENT_POSITIONS = 10   # Hard cap on open positions
+DRAWDOWN_WARNING_PCT = 0.05    # 5% drawdown from session high → warn in logs
+DRAWDOWN_HALT_PCT = 0.10       # 10% drawdown from session high → reject new entries
+CRYPTO_MAX_AGGREGATE = 0.10    # 10% max aggregate crypto exposure
+CRYPTO_MAX_SINGLE = 0.03       # 3% max per single crypto position
 
 # CFD cost model (Plus500 spread-based, not commission-based)
 # CFDs have no explicit commission — cost is embedded in the bid/ask spread.
@@ -379,9 +389,6 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 # ============================================
 # TRADING RULES
 # ============================================
-
-# Maximum number of concurrent positions
-MAX_CONCURRENT_POSITIONS = 3
 
 # Minimum price movement for entry
 MIN_PRICE_MOVEMENT = 0.0001

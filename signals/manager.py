@@ -6,6 +6,7 @@ Logs signals to CSV, retrieves history, and formats output.
 
 import csv
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -37,17 +38,81 @@ class SignalManager:
                 writer = csv.writer(f)
                 writer.writerow(_CSV_HEADERS)
 
-    def log_signal(self, signal: Signal) -> None:
-        """Append a signal to the CSV log.
+    def _is_duplicate(self, signal: Signal, window_hours: int = 4) -> bool:
+        """Check if same ticker+direction+entry_price was logged recently.
+
+        Args:
+            signal: Signal to check for duplicates.
+            window_hours: Hours to look back (4 for 1h, 24 for 1d).
+
+        Returns:
+            True if duplicate found (should skip logging).
+        """
+        if not self.log_file.exists():
+            return False
+
+        try:
+            # Read last 50 lines only (fast, avoids parsing entire CSV)
+            lines = []
+            with open(self.log_file, 'r') as f:
+                all_lines = f.readlines()
+                lines = all_lines[-50:] if len(all_lines) > 50 else all_lines[1:]  # skip header
+
+            if not lines:
+                return False
+
+            cutoff = datetime.now() - timedelta(hours=window_hours)
+            target_entry = round(signal.entry_price, 2)
+
+            for line in reversed(lines):
+                try:
+                    row = next(csv.reader([line.strip()]))
+                    if len(row) < 6:
+                        continue
+
+                    ts_str, _, ticker, _, direction, entry_str = row[:6]
+
+                    # Parse timestamp
+                    ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    if ts < cutoff:
+                        break  # older than window, stop searching
+
+                    # Match: same ticker + same direction + similar entry price
+                    if (ticker == signal.ticker
+                            and direction == signal.direction
+                            and abs(round(float(entry_str), 2) - target_entry) < 0.01):
+                        logger.debug(f"Dedup: {signal.ticker} {signal.direction} "
+                                     f"@ ${signal.entry_price:.2f} already logged at {ts_str}")
+                        return True
+                except (ValueError, StopIteration):
+                    continue
+
+        except Exception as e:
+            logger.debug(f"Dedup check failed: {e}")
+
+        return False
+
+    def log_signal(self, signal: Signal, window_hours: int = 4) -> bool:
+        """Append a signal to the CSV log (with dedup).
 
         Args:
             signal: Signal object to log.
+            window_hours: Hours to look back for dedup (4 for 1h, 24 for 1d).
+
+        Returns:
+            True if logged, False if deduped.
         """
+        if self._is_duplicate(signal, window_hours):
+            logger.info(f"Dedup: skipping {signal.direction} {signal.ticker} "
+                        f"@ ${signal.entry_price:.2f} (already logged recently)")
+            return False
+
         row = signal.to_dict()
         with open(self.log_file, 'a', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=_CSV_HEADERS)
             writer.writerow(row)
         logger.info(f"Signal logged: {signal.direction} {signal.ticker} @ {signal.entry_price:.2f}")
+        return True
 
     def get_history(self, ticker: str | None = None, n: int = 20) -> pd.DataFrame:
         """Get the last N signals from the log.

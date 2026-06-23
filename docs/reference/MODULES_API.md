@@ -1,0 +1,153 @@
+# CFD Trading System - Module API Reference
+
+Detailed API documentation for all modules.
+
+---
+
+## data/fetcher.py - DataFetcher
+
+- `fetch_yfinance(ticker, interval, days)` -> DataFrame OHLCV. Tested: SPY 1d, BTC-USD 1h
+- `fetch_ccxt(symbol, timeframe, limit)` -> DataFrame OHLCV via CCXT. Lazy-loads exchange connection
+- `save_to_csv(df, ticker, interval)` -> guarda en `data/raw/{TICKER}_{interval}.csv`
+- `load_from_csv(ticker, interval)` -> carga desde `data/raw/`
+- `_normalize_columns(df)` -> flatten MultiIndex de yfinance, lowercase, valida OHLCV
+
+## data/processor.py - DataProcessor
+
+- `clean_data(df)` -> deduplica index, sort, ffill gaps (limit=3), drop NaN, clip volume >= 0
+- `validate_data(df)` -> verifica: columnas OHLCV, no vacio, DatetimeIndex, no NaN, high >= low
+- `save_processed(df, ticker, interval)` -> guarda en `data/processed/`
+
+## indicators/technical.py - TechnicalIndicators
+
+- `add_all_indicators(df)` -> agrega los 12 indicadores de golpe
+- `add_macd(df, fast, slow, signal)` -> macd, macd_signal, macd_histogram
+- `add_rsi(df, period)` -> rsi
+- `add_bollinger_bands(df, period, std_dev)` -> bb_upper, bb_middle, bb_lower, bb_bandwidth, bb_percent
+- `add_sma(df, period)` -> sma_{period} (default: sma_50, sma_200)
+- `add_ema(df, period)` -> ema_{period} (default: ema_50, ema_200)
+- `add_vwap(df)` -> vwap (con fallback para daily data)
+- `add_stochastic(df, period, smooth_k, smooth_d)` -> stoch_k, stoch_d
+- `add_adx(df, period)` -> adx, plus_di, minus_di
+- `add_atr(df, period)` -> atr
+- `add_obv(df)` -> obv
+- Total: 26 columnas (5 OHLCV + 21 indicadores). Todos usan params de config/settings.py
+- Tested: SPY 1d 251 rows -> all indicators computed correctly
+
+## strategies/ - Trading Strategies
+
+- `strategies/base.py` - BaseStrategy ABC: generate_signals(), calculate_position_size(), _init_signal_columns()
+- `strategies/scalping/macd_vwap.py` - MACDVWAPStrategy: MACD cross + VWAP filter. SL 0.5%, TP 1%
+- `strategies/scalping/rsi_bb.py` - RSIBBStrategy: RSI oversold/overbought + BB touch. SL 0.7%, TP=bb_middle
+- `strategies/swing/ma_crossover.py` - MACrossoverStrategy: SMA50/200 golden/death cross. SL 2%, TP 3%
+- `strategies/__init__.py` - STRATEGY_MAP = {'macd_vwap': ..., 'rsi_bb': ..., 'ma_crossover': ...}
+- Signal columns added: signal (BUY/SELL/HOLD), entry_price, stop_loss, take_profit, confidence (0-1)
+
+## backtesting/engine.py - BacktestEngine
+
+- `BacktestResult` dataclass: strategy_name, ticker, interval, portfolio (vbt.Portfolio), signals_df, initial_capital
+- `BacktestEngine(initial_capital, commission, slippage)` uses config/settings.py defaults
+- `run(strategy, df, ticker, interval)` -> BacktestResult. Uses VectorBT Portfolio.from_signals()
+- `_interval_to_freq(interval)` -> pandas frequency string for VectorBT
+
+## backtesting/metrics.py - PerformanceMetrics
+
+- `calculate_all(result)` -> dict with 17 metrics: return, trades, win_rate, sharpe, sortino, drawdown, profit_factor, expectancy, best/worst/avg trades, consecutive wins/losses, avg duration
+- `format_summary(metrics)` -> formatted terminal string
+- `_safe_float(value, default)` -> handles NaN/inf from VectorBT stats
+- `_max_consecutive(mask)` -> counts max consecutive True in boolean series
+
+## backtesting/report.py - BacktestReport
+
+- `generate_html(result, metrics)` -> HTML file path
+- 3-row plotly subplot: equity curve (blue), price + BUY/SELL markers (green/red triangles), drawdown % (red fill)
+- Title includes strategy, ticker, interval, return, win rate, trade count
+- Uses plotly_dark template, saves to results/ directory
+
+## signals/pipeline.py - Unified Signal Pipeline
+
+- `UnifiedPipeline` class: Consolidates all signal flows (technical + ML + ensemble + news)
+- `TickerConfig` dataclass: Per-ticker configuration (strategies, intervals, layers)
+- `PipelineResult` dataclass: Complete output with all analysis layers
+- `run_all(category, ticker_filter)` -> List[PipelineResult]. Parallel processing with ThreadPoolExecutor
+- `run_ticker(config)` -> List[PipelineResult]. One per interval, shared data cache
+- `_fetch_data(ticker, interval)` -> **ALWAYS fresh from Yahoo Finance** (not CSV cache)
+- `_apply_ml()`, `_apply_ensemble()`, `_apply_news()` -> Graceful degradation layers
+- `_compute_confluence()` -> Multi-timeframe confluence scoring (0-5 stars)
+- Features: Fresh data, no duplicates, parallel processing, configurable per-ticker
+
+## signals/generator.py - SignalGenerator
+
+- `Signal` dataclass: direction, entry_price, stop_loss, take_profit, confidence, risk_reward_ratio, ensemble_consensus, news_sentiment, confluence_score
+- `SignalGenerator.generate(strategy_name, ticker, interval, days, use_ml)` -> Signal. Full pipeline: fetch -> clean -> indicators -> strategy -> latest signal
+- `SignalGenerator.get_latest_actionable(strategy_name, ticker, interval, lookback)` -> Signal|None. Searches last N bars for BUY/SELL
+- `_apply_ml_filter(signal, df)` -> graceful degradation if ML model not available
+- `_estimate_days(interval)` -> auto-calculates days for sufficient indicator warmup (1m=7d, 5m=30d, 1h=90d, 1d=365d)
+- **Note**: Prefer `UnifiedPipeline` over `generate()` for new code (deprecated in favor of pipeline)
+
+## signals/manager.py - SignalManager
+
+- `log_signal(signal)` -> appends to logs/signals.csv (DictWriter, 12 columns)
+- `get_history(ticker, n)` -> DataFrame with last N signals (optional ticker filter)
+- `format_signal(signal)` -> formatted terminal block with entry/SL/TP/RR/confidence
+- `format_history(df)` -> tabular display of signal history
+
+## signals/telegram_bot.py - TelegramNotifier
+
+- `send_signal(signal)` -> sends Markdown-formatted signal to Telegram chat. Only if enabled + configured
+- `send_alert(message)` -> sends generic alert message
+- `_format_signal_message(signal)` -> Markdown with emoji, entry/SL/TP/RR/confidence, ML info
+- `is_configured` property: checks BOT_TOKEN and CHAT_ID are set
+- Graceful degradation: returns False silently if not configured
+
+## signals/alpaca_broker.py - AlpacaBroker
+
+- `place_signal(signal, interval)` -> executes bracket orders on Alpaca paper sandbox
+- `get_open_positions()` -> dict of current positions with P&L
+- `has_position(symbol)` -> checks if holding a position
+- `calculate_shares(entry, stop_loss)` -> position sizing (2% risk, 5% max per position)
+- `get_trade_history(days)` -> closed trades with P&L calculation
+- `get_performance(days)` -> win rate, profit factor, avg win/loss
+- Stocks: bracket orders with SL/TP. Crypto: notional market orders (no SL/TP — Alpaca limitation)
+- Swing trades (1d): GTC orders, 2x wider SL/TP via `_widen_sl_tp_for_swing()`
+
+## models/hybrid_model.py - HybridLSTMTransformer (DEPRECATED)
+
+- `TransformerEncoderBlock` custom Keras layer: MultiHeadAttention + FFN + LayerNorm + residuals
+- `HybridLSTMTransformer.build(input_shape)` -> compiled Keras model
+- Architecture: Input -> LSTM(50) -> Dropout -> LSTM(50) -> Dropout -> Dense(d_model) -> TransformerEncoder -> GlobalAvgPool -> Dense(25) -> Dropout -> sigmoid
+- `predict(X)` -> bullish probability (0-1). Input shape: (1, lookback_window, n_features)
+
+## models/trainer.py - ModelTrainer
+
+- `prepare_data(df)` -> (X_train, y_train, X_test, y_test). Sliding windows of lookback_window. Labels: 1 if next close > current close. MinMaxScaler normalization. Chronological split (no shuffle)
+- `train(model, X_train, y_train)` -> history dict. EarlyStopping(patience=10) + ReduceLROnPlateau
+- `evaluate(model, X_test, y_test)` -> {loss, accuracy, precision, recall}
+- `save_model(model, ticker, interval)` -> saves weights.h5 + scaler.pkl + metadata.json to models/saved/{ticker}_{interval}/
+- `load_model(ticker, interval)` -> (model, scaler, metadata) tuple. Rebuilds architecture from metadata
+
+## models/predictor.py - PricePredictor
+
+- `load(ticker, interval)` -> loads model+scaler+metadata from disk
+- `predict_next(df)` -> {direction: BUY/SELL, confidence: 0-1, probability: raw sigmoid}
+- `filter_signal(signal_direction, prediction)` -> {accepted: bool, reason: str}. Rejects if ML disagrees or confidence < threshold
+
+## models/xgboost_model.py - XGBoostTrader (Primary ML)
+
+- Primary ML model. Tree-based, regularized, outperforms LSTM on small datasets
+- `prepare_data(df)` -> single-ticker train/test split with triple-barrier labels
+- `prepare_cross_sectional(ticker_dfs)` -> pools data from multiple tickers (Alzaman 2024, Byun 2024)
+- `train(X_train, y_train)` -> fits XGBClassifier with class weight balancing
+- `evaluate(X_test, y_test)` -> {accuracy, precision, recall}
+- `save(ticker, interval)` -> saves model.json + scaler.pkl + metadata.json to models/saved/{ticker}_{interval}_xgb/
+- `XGBoostPredictor` wrapper: `load()`, `predict_next(df)`, `filter_signal(direction, prediction)`
+- Cross-sectional model saved as `all_tickers_{interval}_xgb/`
+
+## models/ensemble_predictor.py - EnsemblePredictor
+
+- Combines LSTM + XGBoost predictions via voting mechanism
+- `load(ticker, interval, models=['lstm', 'xgb'])` -> loads both models
+- `predict_next(df)` -> {lstm: prediction, xgb: prediction, ensemble: consensus}
+- `_ensemble_vote(lstm_pred, xgb_pred)` -> STRONG (both agree) or WEAK (disagree)
+- `filter_signal(signal_direction, df)` -> accepts only when ensemble agrees strongly
+- Graceful degradation: works with single model if one fails to load

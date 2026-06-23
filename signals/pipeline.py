@@ -21,6 +21,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -119,6 +120,7 @@ class UnifiedPipeline:
         self.use_ensemble = use_ensemble
         self.use_news = use_news
         self.send_telegram = send_telegram
+        self._dedup_file = Path('logs/.telegram_dedup')
         self.max_workers = max_workers
         self._fetch_lock = threading.Lock()
         self.fetcher = DataFetcher()
@@ -677,22 +679,61 @@ class UnifiedPipeline:
     def notify_actionable(self, results: list[PipelineResult]) -> int:
         """Send Telegram notifications for actionable results.
 
+        Uses file-based dedup that persists across process invocations
+        (Windows Task Scheduler creates a new process each hour).
+
         Args:
             results: Pipeline results to check.
 
         Returns:
             Number of notifications sent.
         """
+        import time as _time
+
         if not self.send_telegram or not self.notifier.is_configured:
             return 0
+
+        now = _time.time()
+        DEDUP_SECONDS = 4 * 3600  # 4 hours
+
+        # Load dedup state from file
+        dedup_state: dict[str, float] = {}
+        try:
+            if self._dedup_file.exists():
+                with open(self._dedup_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if ':' in line:
+                            key, ts = line.split(':', 1)
+                            dedup_state[key] = float(ts)
+        except Exception as e:
+            logger.debug(f"Failed to load dedup state: {e}")
+
+        # Cleanup old entries
+        dedup_state = {k: v for k, v in dedup_state.items() if now - v < DEDUP_SECONDS}
 
         sent = 0
         for result in results:
             if result.is_actionable():
+                dedup_key = f"{result.ticker}_{result.final_direction}"
+                if dedup_key in dedup_state:
+                    logger.debug(f"Skipping duplicate Telegram: {dedup_key}")
+                    continue
                 try:
                     msg = self.format_telegram_message(result)
                     self.notifier.send_alert(msg)
+                    dedup_state[dedup_key] = now
                     sent += 1
                 except Exception as e:
                     logger.warning(f"Telegram notification failed for {result.ticker}: {e}")
+
+        # Save dedup state to file
+        try:
+            self._dedup_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._dedup_file, 'w') as f:
+                for key, ts in dedup_state.items():
+                    f.write(f"{key}:{ts}\n")
+        except Exception as e:
+            logger.debug(f"Failed to save dedup state: {e}")
+
         return sent

@@ -1011,7 +1011,9 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
                 f"conf={result.confidence:.0%} | "
                 f"{'OK' if result.placed else result.reason}"
             )
-            manager.log_signal(r.technical_signal)
+            # Dedup window: 4h for intraday (1h), 24h for swing (1d)
+            window = 24 if r.interval == '1d' else 4
+            manager.log_signal(r.technical_signal, window_hours=window)
 
     placed = sum(1 for t in trades if t.placed)
     failed = sum(1 for t in trades if not t.placed)

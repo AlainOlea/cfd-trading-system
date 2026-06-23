@@ -98,12 +98,19 @@ class TestSignalManager:
 
         try:
             manager = SignalManager(log_file=log_path)
-            for ticker in ['SPY', 'GLD', 'SPY']:
-                manager.log_signal(Signal(
-                    strategy='test', ticker=ticker, interval='1d',
-                    direction='HOLD', entry_price=100.0,
-                    stop_loss=0, take_profit=0, confidence=0,
-                ))
+            signals = [
+                Signal(strategy='test', ticker='SPY', interval='1d',
+                       direction='HOLD', entry_price=100.0,
+                       stop_loss=0, take_profit=0, confidence=0),
+                Signal(strategy='test', ticker='GLD', interval='1d',
+                       direction='HOLD', entry_price=100.0,
+                       stop_loss=0, take_profit=0, confidence=0),
+                Signal(strategy='test', ticker='SPY', interval='1d',
+                       direction='BUY', entry_price=100.0,
+                       stop_loss=99.0, take_profit=101.0, confidence=0.8),
+            ]
+            for sig in signals:
+                manager.log_signal(sig)
 
             spy_signals = manager.get_history(ticker='SPY')
             assert len(spy_signals) == 2

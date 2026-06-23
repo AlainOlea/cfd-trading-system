@@ -30,13 +30,15 @@ docs/
 │   ├── FRESH_DATA_FIX.md
 │   ├── TRADING_SYSTEM_COMPLETE.md
 │   ├── IMPLEMENTATION_COMPLETE.md
-│   └── GPU_CUDA_SUMMARY.md
+│   ├── GPU_CUDA_SUMMARY.md
+│   └── SYSTEM_AUDIT_GUIDE.md
 │
 ├── reference/
 │   ├── ML_RESEARCH.md
 │   ├── PROJECT_SPECS.md
 │   ├── AGENT_CONTEXT.md
-│   └── ML_RETRAINING_SUMMARY.md
+│   ├── ML_RETRAINING_SUMMARY.md
+│   └── MODULES_API.md
 │
 └── quickstart/
     ├── ML_RETRAINING.md
@@ -73,5 +75,6 @@ docs/
 | `reference/ML_RESEARCH.md` | 8 KB | 8 papers + 2 books on ML for trading |
 | `analysis/SESSION_2026-05-19.md` | 12 KB | Audit session changelog |
 | `analysis/SESSION_2026-06-05.md` | 8 KB | Paper trading setup + Alpaca integration |
+| `analysis/SYSTEM_AUDIT_GUIDE.md` | 6 KB | Financial advisor evaluation guide |
 | `analysis/TRADING_SYSTEM_COMPLETE.md` | Large | Complete system analysis |
 | `quickstart/GUIA_COMPLETA.md` | Large | Complete guide (Spanish) |

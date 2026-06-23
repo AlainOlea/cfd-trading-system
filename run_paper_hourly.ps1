@@ -2,6 +2,13 @@
 # Runs: Every hour 11:00-20:00 UTC (7am-4pm ET) Mon-Fri via Windows Task Scheduler
 # Orders: DAY (intraday), SL 0.5%, TP 1%
 
+# ── Weekday guard: skip weekends ──
+$dayOfWeek = (Get-Date).DayOfWeek
+if ($dayOfWeek -eq 'Saturday' -or $dayOfWeek -eq 'Sunday') {
+    Write-Host "[$( Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] Weekend ($dayOfWeek) - skipping paper trade"
+    exit 0
+}
+
 $ProjectDir = "/home/alaindolea/proyectos/cfd-trading-system"
 $LogDir = "$ProjectDir/logs/paper"
 $Date = Get-Date -Format "yyyy-MM-dd"
