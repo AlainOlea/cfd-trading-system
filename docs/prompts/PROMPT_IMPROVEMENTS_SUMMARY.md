@@ -295,7 +295,7 @@ New: "Multiple major negative catalysts from high-credibility sources strongly s
 
 ### Files Modified
 - **signals/news_analyzer.py** - New prompt + improved parsing + better formatting
-- **test_news_integration.py** - Updated to show all new fields
+- **tests/test_news_integration.py** - Updated to show all new fields
 
 ### Backward Compatibility
 ✅ **Fully compatible** - Old code still works, just gets richer data

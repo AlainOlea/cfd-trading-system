@@ -358,19 +358,19 @@ Win rate: 56% (muchos más trades)
 
 1. **Generar señales en múltiples períodos**
    ```bash
-   python live_signals.py --multi-freq
+   python3 main.py pipeline --intervals 1d,1h
    ```
 
 2. **Entrenar modelos para 1h y 15m**
    ```bash
-   python train_multiperiod_models.py
+   python3 scripts/train_multiperiod_models.py
    ```
 
 ### Short Term (Esta Semana)
 
 1. **Crear monitoreo multi-período en tiempo real**
    ```bash
-   python main.py watch --use-ml --intervals 1d,1h,15m --every 60
+   python3 main.py paper-trade --interval 1h
    ```
 
 2. **Backtesting con multi-período**

@@ -48,6 +48,7 @@ signals/telegram_bot.py     # TelegramNotifier: senales via Telegram
 signals/alpaca_broker.py    # AlpacaBroker: paper trading bracket orders
 models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting
+scripts/                    # Utility scripts (training, comparison, backfill)
 tests/                      # 132 tests (all passing)
 ```
 

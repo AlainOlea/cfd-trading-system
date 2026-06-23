@@ -178,7 +178,7 @@ python main.py backtest --strategy ma_crossover --ticker GLD --use-ml
 
 ```bash
 # Reentrenar los 4 mejores modelos con 100 epochs
-python improve_best_models.py
+python scripts/improve_best_models.py
 
 # Tarda ~30-40 minutos
 # GLD: 64% → 70%+
@@ -191,7 +191,7 @@ python improve_best_models.py
 
 ```bash
 # Entrenar GLD, MSFT, QQQ en 1d, 1h, 15m
-python train_multiperiod_models.py
+python scripts/train_multiperiod_models.py
 
 # Resultados:
 # - Aprenderás qué período es mejor para cada ticker
@@ -203,7 +203,7 @@ python train_multiperiod_models.py
 
 ```bash
 # Reentrenar todos los 9 modelos con 50 epochs
-python train_all_models.py
+python scripts/train_all_models.py
 
 # Similar a antes pero con más refinamiento
 ```
@@ -339,10 +339,10 @@ python live_signals.py --history
 
 | Archivo | Propósito |
 |---------|-----------|
-| `main.py` | CLI principal (10 comandos) |
-| `live_signals.py` | ⭐ Genera señales en vivo |
-| `improve_best_models.py` | Mejora modelos con 100 epochs |
-| `train_multiperiod_models.py` | Entrena múltiples períodos |
+| `main.py` | CLI principal (17+ comandos) |
+| `signals/pipeline.py` | ⭐ Unified Pipeline (fetch + indicators + strategies + ML + ensemble) |
+| `scripts/improve_best_models.py` | Mejora modelos con 100 epochs |
+| `scripts/train_multiperiod_models.py` | Entrena múltiples períodos |
 | `signals/generator.py` | Lógica de generación de señales |
 | `models/trainer.py` | Entrenamiento de modelos |
 | `models/predictor.py` | Predicción con modelos |
@@ -354,17 +354,17 @@ python live_signals.py --history
 ## ⚡ Quick Start (5 minutos)
 
 ```bash
-# 1. Genera señal ahora
-python live_signals.py
+# 1. Genera señales con pipeline
+python3 main.py pipeline
 
-# 2. Monitorea por 1 hora
-python main.py watch --use-ml --tickers GLD,MSFT --every 60
+# 2. Paper trading
+python3 main.py paper-trade --interval 1h
 
 # 3. Historial
-python live_signals.py --history
+python3 main.py paper-history
 
-# 4. Mejora modelos mañana
-python improve_best_models.py  # Tarda 30-40 min
+# 4. Mejora modelos
+python3 scripts/improve_best_models.py  # Tarda 30-40 min
 ```
 
 ---
@@ -403,14 +403,14 @@ Risk/Reward: Mínimo 1:1.5
 ## 🚀 Próximos Pasos Sugeridos
 
 ### Corto Plazo (Hoy/Mañana)
-1. ✅ Genera señales en vivo: `python live_signals.py`
-2. ✅ Monitorea por 1 día: `python main.py watch --use-ml`
-3. ✅ Revisa historial: `python live_signals.py --history`
+1. ✅ Genera señales con pipeline: `python3 main.py pipeline`
+2. ✅ Paper trading: `python3 main.py paper-trade --interval 1h`
+3. ✅ Revisa historial: `python3 main.py paper-history`
 
 ### Mediano Plazo (Esta Semana)
-1. 📈 Mejora mejores modelos: `python improve_best_models.py` (100 epochs)
-2. 📊 Entrena múltiples períodos: `python train_multiperiod_models.py`
-3. 🎯 Backtesting con ML: `python main.py backtest --strategy ... --use-ml`
+1. 📈 Mejora mejores modelos: `python3 scripts/improve_best_models.py` (100 epochs)
+2. 📊 Entrena múltiples períodos: `python3 scripts/train_multiperiod_models.py`
+3. 🎯 Backtesting con ML: `python3 main.py backtest --strategy ... --use-ml`
 
 ### Largo Plazo (Este Mes)
 1. 🔄 Reentrenar todos los modelos regularmente
@@ -423,23 +423,23 @@ Risk/Reward: Mínimo 1:1.5
 ## ✅ Sistema Listo Para
 
 - ✅ Generar señales técnicas en tiempo real
-- ✅ Filtrar con ML (50.36% accuracy promedio)
+- ✅ Filtrar con ML (cross-sectional XGBoost + LSTM ensemble)
 - ✅ Notificaciones Telegram automáticas
 - ✅ Backtesting de estrategias
-- ✅ Monitoreo continuo (watch mode)
+- ✅ Paper trading automatizado (Windows Task Scheduler)
 - ✅ Multi-período análisis
 - ✅ Risk management incorporado
 
 ## ⚠️ Importante
 
-- Manual execution en Plus500 (sin API)
+- Paper trading en Alpaca (sin dinero real)
 - Verificar siempre antes de ejecutar trades
 - No usar apalancamiento por ahora
-- Empezar con paper trading (sin dinero real)
+- Empezar con paper trading antes de real money
 - Mejorar modelos continuamente
 
 ---
 
 **Status: ✅ SISTEMA COMPLETAMENTE FUNCIONAL Y LISTO PARA TRADING**
 
-Puedes empezar ahora: `python live_signals.py`
+Puedes empezar ahora: `python3 main.py pipeline`

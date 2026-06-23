@@ -22,7 +22,7 @@ The trading system now integrates real-time news sentiment analysis with ensembl
 - Error handling: API failures logged but don't crash the system
 - Telegram notifications include full news context and sentiment analysis
 
-### 3. **Test Script** (`test_news_integration.py`)
+### 3. **Test Script** (`tests/test_news_integration.py`)
 - Simulates trading signals with full news context
 - Supports custom ticker, direction, and confidence
 - Shows complete Telegram message format
@@ -129,13 +129,13 @@ Confidence Adjustment: DECREASE
 
 ```bash
 # Test GLD BUY signal
-python3 test_news_integration.py --ticker GLD --direction BUY --confidence 0.72
+python3 tests/test_news_integration.py --ticker GLD --direction BUY --confidence 0.72
 
 # Test MSFT SELL signal
-python3 test_news_integration.py --ticker MSFT --direction SELL --confidence 0.68
+python3 tests/test_news_integration.py --ticker MSFT --direction SELL --confidence 0.68
 
 # Test multiple tickers
-python3 test_news_integration.py --multiple
+python3 tests/test_news_integration.py --multiple
 ```
 
 ### Run Live Signal Generation with News
@@ -360,7 +360,7 @@ grep TELEGRAM .env
 
 For issues or questions:
 1. Check logs: `tail -100 logs/signals.csv`
-2. Run diagnostic: `python3 test_news_integration.py --ticker GLD`
+2. Run diagnostic: `python3 tests/test_news_integration.py --ticker GLD`
 3. Review implementation: `signals/news_analyzer.py`
 4. Check configuration: `.env` and `config/settings.py`
 
@@ -371,7 +371,7 @@ For issues or questions:
 - **signals/news_analyzer.py** - NewsAnalyzer class (220 lines)
 - **live_signals_expanded.py** - Integration + news fetching (38 new lines)
 - **.env.example** - API key placeholders
-- **test_news_integration.py** - Test script (200 lines)
+- **tests/test_news_integration.py** - Test script (200 lines)
 - **NEWS_ANALYZER_SETUP.md** - Setup guide
 
 ---
