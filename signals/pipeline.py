@@ -328,16 +328,29 @@ class UnifiedPipeline:
         return result
 
     def _fetch_data(self, ticker: str, interval: str) -> pd.DataFrame:
-        """Fetch FRESH data for a ticker+interval from Yahoo Finance.
+        """Fetch FRESH data for a ticker+interval.
 
-        Always fetches live data to ensure signals are based on current prices.
-        Thread-safe: serializes yfinance calls with a lock.
+        Default: incremental fetch from Alpaca Data API (only new candles).
+        Fallback: Yahoo Finance if Alpaca is unavailable.
+
+        Thread-safe: serializes fetch calls with a lock.
         Saves to CSV as backup after fetching.
         """
-        days = self.generator._estimate_days(interval)
-        logger.info(f"Fetching fresh data for {ticker} {interval} ({days}d)")
         with self._fetch_lock:
-            df = self.fetcher.fetch_yfinance(ticker, interval, days)
+            try:
+                # Try incremental fetch (Alpaca Data API)
+                from data.alpaca_data import ALPACA_DATA_AVAILABLE
+                if ALPACA_DATA_AVAILABLE:
+                    logger.info(f"Incremental fetch for {ticker} {interval}")
+                    df = self.fetcher.fetch_incremental(ticker, interval)
+                else:
+                    raise ImportError("Alpaca Data API not available")
+            except Exception:
+                # Fallback to Yahoo Finance
+                days = self.generator._estimate_days(interval)
+                logger.info(f"Yahoo Finance fallback for {ticker} {interval} ({days}d)")
+                df = self.fetcher.fetch_yfinance(ticker, interval, days)
+
         df = self.processor.clean_data(df)
         self.processor.validate_data(df)
         self.fetcher.save_to_csv(df, ticker, interval)

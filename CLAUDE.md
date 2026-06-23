@@ -11,9 +11,10 @@ Sistema hibrido de trading tecnico para CFDs. Genera senales automaticas (analis
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-python3 main.py status          # verificar instalacion
-python3 main.py list-strategies # ver estrategias disponibles
-pytest tests/ -v                # correr tests
+python3 main.py status              # verificar instalacion
+python3 main.py list-strategies     # ver estrategias disponibles
+python3 main.py fetch-1min-history  # fetch 3y data 1min (Alpaca API)
+pytest tests/ -v                    # correr tests
 ```
 
 ## Environment
@@ -22,13 +23,17 @@ pytest tests/ -v                # correr tests
 - **pandas-ta**: 0.4.71b0, **yfinance**: 1.1.0, **ccxt**: 4.5.37
 - **TensorFlow**: 2.20.0 (CPU mode), **XGBoost**: Primary ML model
 - **VectorBT**: 0.28.4 (backtesting)
+- **alpaca-py**: Data API (free tier: IEX feed, 200 calls/min, 15-min delay)
 
 ## Project Structure
 ```
 config/settings.py          # Configuracion central (tickers, parametros, ML config)
-main.py                     # CLI entry point (Click) - 9 comandos
-data/fetcher.py             # DataFetcher: yfinance + CCXT
+main.py                     # CLI entry point (Click) - 17+ comandos
+data/fetcher.py             # DataFetcher: yfinance + CCXT + Alpaca incremental
 data/processor.py           # DataProcessor: limpieza y validacion
+data/alpaca_data.py         # AlpacaDataFetcher: Alpaca Data API wrapper (stocks + crypto)
+data/rate_limiter.py        # RateLimiter: token bucket (200 calls/min)
+data/metadata.py            # FetchMetadata: tracker de timestamps por ticker+interval
 indicators/technical.py     # TechnicalIndicators: 12 indicadores via pandas-ta
 strategies/base.py          # BaseStrategy: clase abstracta + position sizing
 strategies/scalping/        # MACDVWAPStrategy, RSIBBStrategy
@@ -43,14 +48,14 @@ signals/telegram_bot.py     # TelegramNotifier: senales via Telegram
 signals/alpaca_broker.py    # AlpacaBroker: paper trading bracket orders
 models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting
-tests/                      # 47 tests (all passing)
+tests/                      # 132 tests (all passing)
 ```
 
 ## Key Features
 
 ### Unified Signal Pipeline
 `python3 main.py pipeline` ejecuta todo: fetch fresh data -> indicators -> strategies -> ML filter -> ensemble -> confluence scoring -> Telegram.
-- Fresh data: Siempre fetch de Yahoo Finance (nunca CSV stale)
+- Fresh data: Alpaca Data API (incremental, solo velas nuevas) con fallback a Yahoo Finance
 - ML: XGBoost cross-sectional (19 tickers, 5y data) + LSTM ensemble
 - Confluence: Multi-timeframe scoring (0-5 stars)
 
@@ -91,7 +96,7 @@ Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
 | ML Model | XGBoost (primary) | Better than LSTM on tabular data |
 | Backtesting | VectorBT | 1000x faster, ideal para scalping |
 | Alertas | Terminal + Telegram | Senales consola + notificaciones moviles |
-| Data | Always fresh from Yahoo | Never use stale CSV cache |
+| Data | Alpaca Data API (incremental) | Free tier, 200 calls/min, 7+ years history |
 | Paper Trading | Windows Task Scheduler + WSL | Survives sleep/hibernate |
 
 ## Do's and Don'ts

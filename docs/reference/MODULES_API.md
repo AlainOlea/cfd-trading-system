@@ -11,6 +11,36 @@ Detailed API documentation for all modules.
 - `save_to_csv(df, ticker, interval)` -> guarda en `data/raw/{TICKER}_{interval}.csv`
 - `load_from_csv(ticker, interval)` -> carga desde `data/raw/`
 - `_normalize_columns(df)` -> flatten MultiIndex de yfinance, lowercase, valida OHLCV
+- `fetch_incremental(ticker, interval)` -> incremental fetch via Alpaca Data API, fallback yfinance
+- `fetch_incremental_batch(tickers, interval)` -> batch incremental para multiples tickers
+- `fetch_1min_history(tickers, years, chunk_days)` -> fetch historico 1min por chunks (max 7y stocks, 5y crypto)
+- `_merge_dataframes(existing, new)` -> merge dos DataFrames, dedup por index, sort
+
+## data/alpaca_data.py - AlpacaDataFetcher
+
+- Wrapper de Alpaca Data API con rate limiting y paginacion
+- `fetch_bars(symbols, interval, start, end)` -> dict[ticker, DataFrame]. Auto-rutea stocks vs crypto
+- `fetch_batch_ranges(symbols, interval, total_days, chunk_days)` -> fetch historico por chunks
+- Soporta: 1m, 5m, 15m, 30m, 1h, 1d
+- Free tier: feed IEX (no SIP), 15-min delay en REST API, 200 calls/min
+- Crypto: convierte `BTC-USD` -> `BTC/USD` para Alpaca
+- `ALPACA_DATA_AVAILABLE` flag: True si alpaca-py esta instalado
+
+## data/rate_limiter.py - RateLimiter
+
+- Token bucket rate limiter, thread-safe
+- `__init__(calls_per_minute)` -> inicializa tokens y rate
+- `acquire(tokens=1)` -> bloquea si no hay tokens suficientes
+- Usado por AlpacaDataFetcher para respetar limites del free tier
+
+## data/metadata.py - FetchMetadata
+
+- Tracker de timestamps de ultimo fetch por ticker+interval
+- Persiste en `data/raw/fetch_metadata.json`
+- `get_last_fetch(ticker, interval)` -> datetime|None
+- `set_last_fetch(ticker, interval, timestamp, rows)` -> guarda timestamp
+- Escritura atomica (tmp + rename) para evitar corrupcion
+- Schema: `{ticker: {interval: {last_fetch, rows}}}`
 
 ## data/processor.py - DataProcessor
 
@@ -71,7 +101,7 @@ Detailed API documentation for all modules.
 - `PipelineResult` dataclass: Complete output with all analysis layers
 - `run_all(category, ticker_filter)` -> List[PipelineResult]. Parallel processing with ThreadPoolExecutor
 - `run_ticker(config)` -> List[PipelineResult]. One per interval, shared data cache
-- `_fetch_data(ticker, interval)` -> **ALWAYS fresh from Yahoo Finance** (not CSV cache)
+- `_fetch_data(ticker, interval)` -> **Alpaca Data API incremental** (fallback Yahoo Finance)
 - `_apply_ml()`, `_apply_ensemble()`, `_apply_news()` -> Graceful degradation layers
 - `_compute_confluence()` -> Multi-timeframe confluence scoring (0-5 stars)
 - Features: Fresh data, no duplicates, parallel processing, configurable per-ticker

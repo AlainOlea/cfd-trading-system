@@ -319,9 +319,10 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
         except FileNotFoundError:
             click.echo(f"   Fetching data...")
             df = fetcher.fetch_yfinance(ticker, interval, days=365)
-            df = processor.clean_data(df)
             fetcher.save_to_csv(df, ticker, interval)
             click.echo(f"   Fetched {len(df)} rows")
+
+        df = processor.clean_data(df)
 
         # 2. Add indicators (features for ML)
         click.echo(f"   Computing indicators...")
@@ -1173,6 +1174,38 @@ def paper_history(days, csv_path, show_all):
                    f"${t['entry']:>9.2f} ${t['exit']:>9.2f} "
                    f"{pnl_s:>10} {t['pnl_pct']:>+7.2f}% "
                    f"{t['exit_type']:>5} {t['duration_min']:>6.1f}")
+
+
+@cli.command('fetch-1min-history')
+@click.option('--tickers', '-t', multiple=True, help='Specific tickers (default: all)')
+@click.option('--years', '-y', default=3, help='Years of history (max 7)')
+@click.option('--chunk-days', default=90, help='Days per batch chunk')
+def fetch_1min_history_cmd(tickers, years, chunk_days):
+    """Fetch 1-minute historical data for model training.
+
+    Uses Alpaca Data API with batch fetching by date ranges.
+    Default: 3 years of 1-min data for all tickers.
+    """
+    from data.fetcher import DataFetcher
+    from config.settings import DEFAULT_TICKERS
+
+    ticker_list = list(tickers) if tickers else DEFAULT_TICKERS
+
+    click.echo(f"📊 Fetching 1-min history for {len(ticker_list)} tickers")
+    click.echo(f"   Years: {years}, Chunk: {chunk_days} days")
+
+    fetcher = DataFetcher()
+    try:
+        results = fetcher.fetch_1min_history(ticker_list, years, chunk_days)
+
+        click.echo(f"\n✅ Fetched 1-min data:")
+        for ticker, df in results.items():
+            click.echo(f"   {ticker}: {len(df):,} rows "
+                      f"({df.index.min().date()} → {df.index.max().date()})")
+
+    except Exception as e:
+        click.echo(f"\n❌ Error: {e}", err=True)
+        sys.exit(1)
 
 
 def _is_market_open(now: datetime, hours: dict) -> bool:

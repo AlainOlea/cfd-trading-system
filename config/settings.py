@@ -275,6 +275,11 @@ BITSO_API_URL = 'https://api.bitso.com/v3'
 BITSO_API_KEY = os.getenv('BITSO_API_KEY', '')
 BITSO_API_SECRET = os.getenv('BITSO_API_SECRET', '')
 
+# Alpaca Data API settings (free tier: 200 calls/min, 7+ years 1-min bars)
+ALPACA_DATA_RATE_LIMIT = 200       # Calls per minute
+ALPACA_DATA_DEFAULT_CHUNK_DAYS = 90 # Days per batch fetch chunk
+ALPACA_DATA_1MIN_YEARS = 3          # Years of 1-min data for model training
+
 # ============================================
 # DATA & LOGGING
 # ============================================
@@ -287,6 +292,9 @@ MODELS_DIR = PROJECT_ROOT / 'models'
 MODELS_SAVED_DIR = MODELS_DIR / 'saved'
 LOGS_DIR = PROJECT_ROOT / 'logs'
 BACKTEST_RESULTS_DIR = PROJECT_ROOT / 'results'
+
+# Fetch metadata tracker (persists last fetch timestamps)
+FETCH_METADATA_FILE = RAW_DATA_DIR / 'fetch_metadata.json'
 
 # Create directories if they don't exist
 for directory in [RAW_DATA_DIR, PROCESSED_DATA_DIR, MODELS_SAVED_DIR, LOGS_DIR, BACKTEST_RESULTS_DIR]:

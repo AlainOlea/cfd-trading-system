@@ -1,11 +1,12 @@
 """
 Data Fetcher Module
-===================
-Downloads OHLCV data from Yahoo Finance and CCXT (Bitso) exchanges.
+==================
+Downloads OHLCV data from Yahoo Finance, CCXT (Bitso) exchanges,
+and Alpaca Data API (incremental).
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import ccxt
@@ -13,6 +14,7 @@ import pandas as pd
 import yfinance as yf
 
 from config.settings import (
+    ALPACA_DATA_DEFAULT_CHUNK_DAYS,
     BITSO_API_KEY,
     BITSO_API_SECRET,
     CCXT_ENABLE_RATEIMIT,
@@ -23,6 +25,13 @@ from config.settings import (
     YFINANCE_PREPOST,
     YFINANCE_THREADS,
 )
+
+try:
+    from data.alpaca_data import AlpacaDataFetcher
+    from data.metadata import FetchMetadata
+    ALPACA_DATA_AVAILABLE = True
+except ImportError:
+    ALPACA_DATA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -255,3 +264,164 @@ class DataFetcher:
         df = df[expected].copy()
         df.index.name = 'datetime'
         return df
+
+    # ============================================
+    # INCREMENTAL FETCH (Alpaca Data API)
+    # ============================================
+
+    def fetch_incremental(
+        self,
+        ticker: str,
+        interval: str,
+        chunk_days: int = None,
+    ) -> pd.DataFrame:
+        """Fetch data incrementally using Alpaca Data API.
+
+        Only fetches new data since last fetch. Merges with existing CSV.
+        Falls back to yfinance if Alpaca is unavailable.
+
+        Args:
+            ticker: Symbol (e.g. 'SPY', 'BTC-USD').
+            interval: Data interval ('1m', '1h', '1d').
+            chunk_days: Days per batch chunk. Uses default if None.
+
+        Returns:
+            Merged DataFrame with all data (existing + new).
+        """
+        if not ALPACA_DATA_AVAILABLE:
+            logger.warning("Alpaca Data API unavailable, falling back to yfinance")
+            return self.fetch_yfinance(ticker, interval, days=365)
+
+        metadata = FetchMetadata()
+        last_fetch = metadata.get_last_fetch(ticker, interval)
+
+        # Determine start date for incremental fetch
+        if last_fetch:
+            start = last_fetch
+            logger.info(f"Incremental fetch {ticker} {interval} from {start.isoformat()}")
+        else:
+            # First time: fetch 1 year for 1d/1h, 90 days for 1m
+            days_back = 365 if interval != '1m' else 90
+            start = datetime.now(timezone.utc) - timedelta(days=days_back)
+            logger.info(f"First fetch {ticker} {interval}: {days_back}d from {start.date()}")
+
+        end = datetime.now(timezone.utc)
+
+        # Fetch from Alpaca
+        alpaca = AlpacaDataFetcher()
+        new_data = alpaca.fetch_bars([ticker], interval, start, end)
+
+        if ticker not in new_data or new_data[ticker].empty:
+            logger.warning(f"No new data from Alpaca for {ticker} {interval}")
+            # Try loading existing CSV
+            try:
+                return self.load_from_csv(ticker, interval)
+            except FileNotFoundError:
+                raise ValueError(f"No data available for {ticker} {interval}")
+
+        new_df = new_data[ticker]
+
+        # Merge with existing CSV
+        try:
+            existing_df = self.load_from_csv(ticker, interval)
+            merged = self._merge_dataframes(existing_df, new_df)
+        except FileNotFoundError:
+            merged = new_df
+
+        # Save merged data
+        self.save_to_csv(merged, ticker, interval)
+
+        # Update metadata
+        metadata.set_last_fetch(
+            ticker, interval, datetime.now(timezone.utc), len(merged)
+        )
+
+        logger.info(f"Incremental fetch complete: {len(merged)} rows for {ticker} {interval}")
+        return merged
+
+    def fetch_incremental_batch(
+        self,
+        tickers: list[str],
+        interval: str,
+        chunk_days: int = None,
+    ) -> dict[str, pd.DataFrame]:
+        """Fetch data for multiple tickers incrementally.
+
+        Args:
+            tickers: List of ticker symbols.
+            interval: Data interval.
+            chunk_days: Days per batch chunk.
+
+        Returns:
+            Dict mapping ticker -> DataFrame.
+        """
+        results = {}
+        for ticker in tickers:
+            try:
+                results[ticker] = self.fetch_incremental(ticker, interval, chunk_days)
+            except Exception as e:
+                logger.error(f"Failed to fetch {ticker} {interval}: {e}")
+        return results
+
+    def fetch_1min_history(
+        self,
+        tickers: list[str],
+        years: int = 3,
+        chunk_days: int = None,
+    ) -> dict[str, pd.DataFrame]:
+        """Fetch 1-minute historical data for model training.
+
+        Uses Alpaca Data API with batch fetching by date ranges.
+
+        Args:
+            tickers: List of ticker symbols.
+            years: Years of history to fetch (max ~7 for stocks, ~5 for crypto).
+            chunk_days: Days per batch chunk (default from settings).
+
+        Returns:
+            Dict mapping ticker -> DataFrame with 1-min bars.
+        """
+        if not ALPACA_DATA_AVAILABLE:
+            raise ImportError("Alpaca Data API required for 1-min history")
+
+        chunk = chunk_days or ALPACA_DATA_DEFAULT_CHUNK_DAYS
+        total_days = years * 365
+
+        alpaca = AlpacaDataFetcher()
+        results = alpaca.fetch_batch_ranges(tickers, '1m', total_days, chunk)
+
+        # Save each ticker
+        for ticker, df in results.items():
+            self.save_to_csv(df, ticker, '1m')
+
+        # Update metadata
+        metadata = FetchMetadata()
+        now = datetime.now(timezone.utc)
+        for ticker in results:
+            metadata.set_last_fetch(ticker, '1m', now, len(results[ticker]))
+
+        return results
+
+    @staticmethod
+    def _merge_dataframes(
+        existing: pd.DataFrame, new: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Merge two DataFrames, new data overwrites existing at same index.
+
+        Args:
+            existing: Current CSV data.
+            new: Newly fetched data.
+
+        Returns:
+            Merged DataFrame sorted by date.
+        """
+        if existing.empty:
+            return new
+        if new.empty:
+            return existing
+
+        # Concat, new overwrites existing at same timestamps
+        merged = pd.concat([existing, new])
+        merged = merged[~merged.index.duplicated(keep='last')]
+        merged.sort_index(inplace=True)
+        return merged
