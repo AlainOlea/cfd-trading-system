@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from data.rate_limiter import RateLimiter
 from data.metadata import FetchMetadata
@@ -213,3 +212,21 @@ class TestMergeDataframes:
         assert list(merged.index) == list(pd.DatetimeIndex([
             '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'
         ]))
+
+    def test_merge_tz_naive_and_aware(self):
+        """Merge tz-naive CSV with tz-aware Alpaca data should not raise TypeError."""
+        from data.fetcher import DataFetcher
+
+        # CSV data (tz-naive, like yfinance)
+        old = self._make_df(['2026-01-01', '2026-01-02'], [100, 101])
+
+        # Alpaca data (tz-aware UTC)
+        new = self._make_df(['2026-01-02', '2026-01-03'], [200, 202])
+        new.index = new.index.tz_localize('UTC')
+
+        # This used to raise: TypeError: Cannot compare tz-naive and tz-aware
+        merged = DataFetcher._merge_dataframes(old, new)
+
+        assert len(merged) == 3
+        assert merged.index.tz is None  # Result should be tz-naive
+        assert merged.loc['2026-01-02', 'close'] == 200

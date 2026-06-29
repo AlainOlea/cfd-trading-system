@@ -46,6 +46,49 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================
+# GLOBAL ERROR ALERT VIA TELEGRAM
+# ============================================
+
+_original_excepthook = sys.excepthook
+
+
+def _telegram_excepthook(exc_type, exc_value, exc_tb):
+    """Global exception hook that sends critical errors via Telegram.
+
+    Only fires for truly unhandled exceptions (not caught by try/except).
+    Controlled by TELEGRAM_ERROR_ALERTS_ENABLED in settings.py.
+    """
+    # Still print the traceback to stderr as normal
+    _original_excepthook(exc_type, exc_value, exc_tb)
+
+    try:
+        from config.settings import TELEGRAM_ERROR_ALERTS_ENABLED
+        if not TELEGRAM_ERROR_ALERTS_ENABLED:
+            return
+
+        from signals.telegram_bot import TelegramNotifier
+        notifier = TelegramNotifier()
+        if not notifier.is_configured:
+            return
+
+        # Format error for Telegram (limit to 500 chars)
+        import traceback
+        tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        short_tb = tb_str[-400:] if len(tb_str) > 400 else tb_str
+        msg = (
+            f"🔴 UNHANDLED ERROR\n"
+            f"{exc_type.__name__}: {exc_value}\n\n"
+            f"```\n{short_tb}\n```"
+        )
+        notifier.send_alert(msg)
+    except Exception:
+        pass  # Never let the hook itself crash
+
+
+sys.excepthook = _telegram_excepthook
+
+
+# ============================================
 # COMMANDS GROUP
 # ============================================
 
@@ -169,13 +212,30 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, 
         
         predictor = None
         if use_ml:
-            from models.predictor import PricePredictor
-            predictor = PricePredictor()
-            try:
-                predictor.load(ticker, interval)
-            except Exception as e:
-                click.echo(f"   ⚠️ Could not load ML model: {e}. Running without ML.")
-                predictor = None
+            from config.settings import PRIMARY_ML_MODEL
+            if PRIMARY_ML_MODEL == 'xgboost':
+                from models.xgboost_model import XGBoostPredictor
+                predictor = XGBoostPredictor(confidence_threshold=0.55)
+                loaded = False
+                for model_name in ['all_tickers', ticker]:
+                    try:
+                        predictor.load(model_name, interval)
+                        loaded = True
+                        click.echo(f"   Loaded XGBoost model: {model_name}_{interval}")
+                        break
+                    except FileNotFoundError:
+                        continue
+                if not loaded:
+                    click.echo(f"   ⚠️ Could not load XGBoost model for {ticker}. Running without ML.")
+                    predictor = None
+            else:
+                from models.predictor import PricePredictor
+                predictor = PricePredictor()
+                try:
+                    predictor.load(ticker, interval)
+                except Exception as e:
+                    click.echo(f"   ⚠️ Could not load ML model: {e}. Running without ML.")
+                    predictor = None
                 
         engine = BacktestEngine(initial_capital=initial_capital)
 
@@ -387,7 +447,7 @@ def train_lstm(ticker, interval, epochs, batch_size, validation_split):
 
 
 @cli.command('train-xgb-cross')
-@click.option('--interval', default='1d', type=click.Choice(['1d', '1h']),
+@click.option('--interval', default='1d', type=click.Choice(['1d', '1h', '1m']),
               help='Data interval')
 @click.option('--tickers', default='SPY,QQQ,IWM,DIA,GLD,SLV,USO,UNG,AAPL,NVDA,MSFT,AMZN,GOOGL,META,TSLA,BTC-USD,ETH-USD,SOL-USD,XRP-USD',
               help='Comma-separated tickers to pool for cross-sectional training')
@@ -834,6 +894,10 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
             if sent:
                 click.echo(f"\n  Telegram: {sent} notification(s) sent")
 
+        # Send health check (data freshness warnings)
+        if telegram:
+            pipe.notify_health_check(results)
+
         # Log actionable signals
         from signals.manager import SignalManager
         manager = SignalManager()
@@ -947,6 +1011,9 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
                 click.echo(f"  Telegram: {sent_count} notification(s) sent")
         else:
             click.echo(f"  Telegram: no signals with {min_confluence}+ stars")
+
+        # Send health check (data freshness warnings)
+        pipeline.notify_health_check(results)
 
     click.echo(f"\n  Generated {len(results)} signals, {len(actionable)} actionable")
     click.echo()

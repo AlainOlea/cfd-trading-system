@@ -26,7 +26,10 @@ from typing import Any
 
 import pandas as pd
 
-from config.settings import MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS_RAW
+from config.settings import (
+    MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS_RAW,
+    TELEGRAM_HEALTH_CHECK_ENABLED,
+)
 from data.fetcher import DataFetcher
 from data.processor import DataProcessor
 from indicators.technical import TechnicalIndicators
@@ -123,6 +126,7 @@ class UnifiedPipeline:
         self._dedup_file = Path('logs/.telegram_dedup')
         self.max_workers = max_workers
         self._fetch_lock = threading.Lock()
+        self._data_freshness: dict[str, str] = {}  # ticker_interval -> status
         self.fetcher = DataFetcher()
         self.processor = DataProcessor()
         self.generator = SignalGenerator()
@@ -336,6 +340,9 @@ class UnifiedPipeline:
         Thread-safe: serializes fetch calls with a lock.
         Saves to CSV as backup after fetching.
         """
+        cache_key = f"{ticker}_{interval}"
+        used_fallback = False
+
         with self._fetch_lock:
             try:
                 # Try incremental fetch (Alpaca Data API)
@@ -347,6 +354,7 @@ class UnifiedPipeline:
                     raise ImportError("Alpaca Data API not available")
             except Exception:
                 # Fallback to Yahoo Finance
+                used_fallback = True
                 days = self.generator._estimate_days(interval)
                 logger.info(f"Yahoo Finance fallback for {ticker} {interval} ({days}d)")
                 df = self.fetcher.fetch_yfinance(ticker, interval, days)
@@ -355,6 +363,24 @@ class UnifiedPipeline:
         self.processor.validate_data(df)
         self.fetcher.save_to_csv(df, ticker, interval)
         df = TechnicalIndicators.add_all_indicators(df)
+
+        # Track data freshness for health check
+        try:
+            last_ts = df.index[-1]
+            # Normalize to naive UTC for comparison
+            if hasattr(last_ts, 'tz') and last_ts.tz is not None:
+                last_ts = last_ts.tz_localize(None)
+            now_utc = datetime.utcnow()
+            staleness_hours = (now_utc - last_ts).total_seconds() / 3600
+            if used_fallback:
+                self._data_freshness[cache_key] = f"yfinance ({staleness_hours:.0f}h stale)"
+            elif staleness_hours > 24:
+                self._data_freshness[cache_key] = f"Alpaca ({staleness_hours:.0f}h stale)"
+            else:
+                self._data_freshness[cache_key] = f"fresh ({staleness_hours:.1f}h)"
+        except Exception:
+            self._data_freshness[cache_key] = "unknown"
+
         return df
 
     def _apply_ml(self, ticker: str, interval: str, df: pd.DataFrame) -> dict | None:
@@ -722,8 +748,8 @@ class UnifiedPipeline:
         except Exception as e:
             logger.debug(f"Failed to load dedup state: {e}")
 
-        # Cleanup old entries
-        dedup_state = {k: v for k, v in dedup_state.items() if now - v < DEDUP_SECONDS}
+        # Cleanup old entries (<= so signals at exactly the boundary are still deduped)
+        dedup_state = {k: v for k, v in dedup_state.items() if now - v <= DEDUP_SECONDS}
 
         sent = 0
         for result in results:
@@ -750,3 +776,46 @@ class UnifiedPipeline:
             logger.debug(f"Failed to save dedup state: {e}")
 
         return sent
+
+    def notify_health_check(self, results: list[PipelineResult]) -> bool:
+        """Send a data freshness health summary via Telegram.
+
+        Reports staleness per ticker and flags issues (yfinance fallback,
+        data older than 24h, etc.). Only sends if health check is enabled
+        in settings and there are any stale/problematic tickers.
+
+        Returns:
+            True if a message was sent, False otherwise.
+        """
+        if not self.send_telegram or not self.notifier.is_configured:
+            return False
+        if not TELEGRAM_HEALTH_CHECK_ENABLED:
+            return False
+        if not self._data_freshness:
+            return False
+
+        # Only report if there are problems
+        problems = {k: v for k, v in self._data_freshness.items()
+                    if 'stale' in v or 'fallback' in v or 'yfinance' in v or 'unknown' in v}
+        if not problems:
+            logger.debug("Health check: all tickers fresh, no alert sent")
+            return False
+
+        now_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+        lines = [f"⚠️ Data Health - {now_str}", ""]
+
+        for key, status in sorted(problems.items()):
+            lines.append(f"  {key}: {status}")
+
+        lines.append("")
+        lines.append(f"Total tickers: {len(self._data_freshness)}")
+        lines.append(f"Problems: {len(problems)}")
+
+        msg = "\n".join(lines)
+        try:
+            self.notifier.send_alert(msg)
+            logger.info(f"Health check alert sent: {len(problems)} issues")
+            return True
+        except Exception as e:
+            logger.warning(f"Health check alert failed: {e}")
+            return False

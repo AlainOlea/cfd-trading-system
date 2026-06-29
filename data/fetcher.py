@@ -300,12 +300,35 @@ class DataFetcher:
             start = last_fetch
             logger.info(f"Incremental fetch {ticker} {interval} from {start.isoformat()}")
         else:
-            # First time: fetch 1 year for 1d/1h, 90 days for 1m
-            days_back = 365 if interval != '1m' else 90
-            start = datetime.now(timezone.utc) - timedelta(days=days_back)
-            logger.info(f"First fetch {ticker} {interval}: {days_back}d from {start.date()}")
+            # No metadata: try to infer start from existing CSV last row
+            try:
+                existing_df = self.load_from_csv(ticker, interval)
+                last_ts = existing_df.index[-1]
+                # Convert naive UTC timestamp to aware
+                if last_ts.tzinfo is None:
+                    last_ts = last_ts.replace(tzinfo=timezone.utc)
+                start = last_ts
+                logger.info(f"Incremental fetch {ticker} {interval} from CSV last: {start.isoformat()}")
+            except (FileNotFoundError, IndexError, KeyError):
+                # No CSV either: fetch 1 year for 1d/1h, 90 days for 1m
+                days_back = 365 if interval != '1m' else 90
+                start = datetime.now(timezone.utc) - timedelta(days=days_back)
+                logger.info(f"First fetch {ticker} {interval}: {days_back}d from {start.date()}")
 
         end = datetime.now(timezone.utc)
+
+        # Guard: Alpaca free tier has a 15-min delay, so the effective end
+        # for the API call is (end - 15min). If CSV data is newer than that,
+        # there's nothing new to fetch.
+        alpaca_end = end - timedelta(minutes=15)
+        if start >= alpaca_end:
+            logger.info(f"No new data to fetch for {ticker} {interval} "
+                        f"(CSV up to {start.strftime('%H:%M')}, "
+                        f"Alpaca delay until {alpaca_end.strftime('%H:%M')})")
+            try:
+                return self.load_from_csv(ticker, interval)
+            except FileNotFoundError:
+                raise ValueError(f"No data available for {ticker} {interval}")
 
         # Fetch from Alpaca
         alpaca = AlpacaDataFetcher()
@@ -419,6 +442,12 @@ class DataFetcher:
             return new
         if new.empty:
             return existing
+
+        # Normalize timezone: strip tz from both to avoid tz-naive vs tz-aware errors
+        if existing.index.tz is not None:
+            existing.index = existing.index.tz_localize(None)
+        if new.index.tz is not None:
+            new.index = new.index.tz_localize(None)
 
         # Concat, new overwrites existing at same timestamps
         merged = pd.concat([existing, new])

@@ -229,7 +229,7 @@ class XGBoostTrader:
             df_aligned = df.loc[X.index]
 
             if use_binary:
-                ret = df_aligned['close'].pct_change(-1).shift(1) * -1
+                ret = df_aligned['close'].pct_change(1).shift(-1)
                 y = pd.Series(0, index=df_aligned.index)
                 y[ret > threshold] = 1
                 y[ret < -threshold] = 0
