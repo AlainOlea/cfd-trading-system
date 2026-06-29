@@ -80,7 +80,7 @@ RISK_PER_TRADE = 0.02          # 2% risk per trade (dynamic: recomputed from liv
 MAX_POSITION_PCT = 0.05        # 5% max per single position (of equity)
 MAX_GROSS_EXPOSURE = 0.30      # 30% max total open exposure (sum of all positions)
 MAX_NAME_EXPOSURE = 0.10       # 10% max per single name
-MAX_CONCURRENT_POSITIONS = 10   # Hard cap on open positions
+MAX_CONCURRENT_POSITIONS = 10  # Hard cap on open positions
 DRAWDOWN_WARNING_PCT = 0.05    # 5% drawdown from session high → warn in logs
 DRAWDOWN_HALT_PCT = 0.10       # 10% drawdown from session high → reject new entries
 CRYPTO_MAX_AGGREGATE = 0.10    # 10% max aggregate crypto exposure
@@ -394,6 +394,12 @@ TELEGRAM_ALERTS_ENABLED = True
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '')
 
+# Telegram health check: send data freshness summary after each pipeline run
+TELEGRAM_HEALTH_CHECK_ENABLED = os.getenv('TELEGRAM_HEALTH_CHECK_ENABLED', 'true').lower() == 'true'
+
+# Telegram error alerts: send critical/unexpected errors via Telegram
+TELEGRAM_ERROR_ALERTS_ENABLED = os.getenv('TELEGRAM_ERROR_ALERTS_ENABLED', 'true').lower() == 'true'
+
 # ============================================
 # TRADING RULES
 # ============================================
@@ -423,28 +429,28 @@ WATCH_STRATEGIES = ['macd_vwap', 'rsi_bb']  # Default strategies for watch mode
 # Loaded lazily by signals.pipeline to avoid circular imports
 PIPELINE_TICKERS_RAW = [
     # Indices
-    ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('QQQ', 'indices', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('IWM', 'indices', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
-    ('DIA', 'indices', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('SPY', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('QQQ', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('IWM', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('DIA', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
     # Commodities
-    ('GLD', 'commodities', ['1d', '1h', '15m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('SLV', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('USO', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('UNG', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('GLD', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('SLV', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('UNG', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     # Stocks
-    ('AAPL', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('NVDA', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('MSFT', 'stocks', ['1d'], ['macd_vwap'], True, True, True, 2),
-    ('AMZN', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('GOOGL', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('META', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('TSLA', 'stocks', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('NVDA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('MSFT', 'stocks', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('AMZN', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('GOOGL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('META', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('TSLA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
     # Crypto
-    ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
-    ('ETH-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
-    ('SOL-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, False, 2),
-    ('XRP-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, True, 2),
+    ('BTC-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('ETH-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('SOL-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, False, 2),
+    ('XRP-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
 ]
 
 print("✅ Configuration loaded successfully")

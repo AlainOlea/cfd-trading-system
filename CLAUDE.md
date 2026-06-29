@@ -77,7 +77,7 @@ Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
 
 ### Risk Management
 - Max 2% risk per trade, 5% max position size
-- Max 3 concurrent positions
+- Max 10 concurrent positions (default)
 - Min confluence: 3 stars, ML confidence: 65%
 
 ## Tickers (19)
@@ -106,7 +106,7 @@ Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
 - Usar parametros de `config/settings.py` para todo
 - Implementar graceful degradation
 - Validar DataFrames antes de procesar (columnas OHLCV completas)
-- Risk management: max 2% por trade, max 3 posiciones concurrentes
+- Risk management: max 2% per trade, max 10 concurrent positions (default)
 
 ### Don't
 - NO hardcodear tickers, intervalos o parametros
