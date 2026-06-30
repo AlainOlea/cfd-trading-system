@@ -11,6 +11,11 @@ from dotenv import load_dotenv
 # Load environment variables from .env
 load_dotenv(Path(__file__).parent.parent / '.env')
 
+# Allow TensorFlow to grow GPU memory on demand instead of pre-allocating a
+# fixed block at startup. Without this, TF grabs VRAM that blocks PyTorch
+# cuTLASS kernels (used by TimesFM) from launching.
+os.environ.setdefault("TF_FORCE_GPU_ALLOW_GROWTH", "true")
+
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.parent
 
