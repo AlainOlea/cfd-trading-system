@@ -918,8 +918,8 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
 @click.option('--category', default=None, help='Filter by category (indices, commodities, stocks, crypto)')
 @click.option('--ticker', default=None, help='Single ticker (e.g. SPY, GLD)')
 @click.option('--interval', default='all',
-              type=click.Choice(['1d', '1h', 'all']),
-              help='Timeframe to trade: 1d (swing), 1h (intraday), all (both, default)')
+              type=click.Choice(['1d', '1h', '1m', 'all']),
+              help='Timeframe to trade: 1d (swing), 1h (intraday), 1m (scalping), all (default)')
 @click.option('--no-ml', is_flag=True, help='Disable ML predictions')
 @click.option('--no-ensemble', is_flag=True, help='Disable ensemble voting')
 @click.option('--no-news', is_flag=True, help='Disable news sentiment')
@@ -1060,7 +1060,7 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
                 r.technical_signal.stop_loss
             )
             click.echo(
-                f"  [DRY] {r.technical_signal.direction} {r.ticker} | "
+                f"  [DRY] {r.final_direction} {r.ticker} | "
                 f"entry=${r.technical_signal.entry_price:.2f} | "
                 f"SL=${r.technical_signal.stop_loss:.2f} | "
                 f"TP=${r.technical_signal.take_profit:.2f} | "
