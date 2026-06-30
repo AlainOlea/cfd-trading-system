@@ -407,9 +407,15 @@ class UnifiedPipeline:
                 last_ts = last_ts.tz_localize(None)
             now_utc = datetime.utcnow()
             staleness_hours = (now_utc - last_ts).total_seconds() / 3600
+            # Interval-aware staleness threshold.
+            # 1d bars are timestamped at midnight UTC by Alpaca, so at 7am ET
+            # they always appear ~35h old even when fully up to date.
+            # 72h covers weekends (Fri close → Mon 7am ≈ 63h).
+            _stale_thresholds = {'1m': 2, '5m': 4, '15m': 8, '1h': 26, '1d': 72}
+            stale_threshold = _stale_thresholds.get(interval, 24)
             if used_fallback:
                 self._data_freshness[cache_key] = f"yfinance ({staleness_hours:.0f}h stale)"
-            elif staleness_hours > 24:
+            elif staleness_hours > stale_threshold:
                 self._data_freshness[cache_key] = f"Alpaca ({staleness_hours:.0f}h stale)"
             else:
                 self._data_freshness[cache_key] = f"fresh ({staleness_hours:.1f}h)"
