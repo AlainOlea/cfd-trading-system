@@ -29,6 +29,8 @@ import pandas as pd
 from config.settings import (
     MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS_RAW,
     TELEGRAM_HEALTH_CHECK_ENABLED,
+    SCALPING_SL_PERCENT, SCALPING_TP_PERCENT,
+    SWING_SL_PERCENT, SWING_TP_PERCENT,
 )
 from data.fetcher import DataFetcher
 from data.processor import DataProcessor
@@ -76,13 +78,17 @@ class PipelineResult:
     ensemble_result: dict | None = None
     news_sentiment: dict | None = None
     confluence_score: int = 0           # 0-5 stars
+    confluence_min_stars: int = 2       # minimum to be actionable
     final_direction: str = 'HOLD'       # BUY/SELL/HOLD
     final_confidence: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
 
     def is_actionable(self) -> bool:
         """Check if this result has an actionable signal."""
-        return self.final_direction in ('BUY', 'SELL')
+        return (
+            self.final_direction in ('BUY', 'SELL')
+            and self.confluence_score >= self.confluence_min_stars
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for logging."""
@@ -132,6 +138,17 @@ class UnifiedPipeline:
         self.generator = SignalGenerator()
         self.manager = SignalManager()
         self.notifier = TelegramNotifier()
+        self._tfm_results: dict = {}
+        # Shared data cache — populated by _fetch_data() during run_all(), cleared at
+        # start of each run. Lets TimesFM reuse data already fetched by the pipeline
+        # instead of making a separate API call.
+        self._run_cache: dict[str, pd.DataFrame] = {}
+        try:
+            from models.timesfm_predictor import TimesFMPredictor
+            self.timesfm = TimesFMPredictor()
+        except ImportError:
+            self.timesfm = None
+            logger.debug("TimesFM not available (timesfm package not installed)")
 
     def run_ticker(self, config: TickerConfig) -> list[PipelineResult]:
         """Execute the full pipeline for a single ticker across all its intervals.
@@ -199,6 +216,10 @@ class UnifiedPipeline:
                 for c in configs if interval_filter in c.intervals
             ]
 
+        # Reset per-run data cache. _fetch_data() populates this so the same
+        # ticker+interval is never fetched twice within a single run_all() call.
+        self._run_cache = {}
+
         all_results: list[PipelineResult] = []
 
         # Run tickers in parallel using ThreadPoolExecutor
@@ -214,6 +235,11 @@ class UnifiedPipeline:
                     all_results.extend(results)
                 except Exception as e:
                     logger.error(f"Pipeline failed for {config.ticker}: {e}\n{traceback.format_exc()}")
+
+        # Run TimesFM AFTER the main pipeline so it reuses _run_cache (no extra fetches).
+        # Then apply confluence bonus and dynamic SL/TP to the collected results.
+        self._run_timesfm_batch(configs)
+        self._apply_timesfm(all_results)
 
         return all_results
 
@@ -305,6 +331,7 @@ class UnifiedPipeline:
             technical_signal=best_signal,
             final_direction=best_signal.direction,
             final_confidence=best_signal.confidence,
+            confluence_min_stars=config.confluence_min_stars,
         )
 
         # 3. ML filter (single model)
@@ -339,11 +366,19 @@ class UnifiedPipeline:
 
         Thread-safe: serializes fetch calls with a lock.
         Saves to CSV as backup after fetching.
+        Results are cached in self._run_cache for the duration of run_all() so the
+        same ticker+interval is never fetched twice in a single pipeline invocation.
         """
         cache_key = f"{ticker}_{interval}"
+        if cache_key in self._run_cache:
+            return self._run_cache[cache_key]
+
         used_fallback = False
 
         with self._fetch_lock:
+            # Re-check inside lock: another thread may have fetched while we waited
+            if cache_key in self._run_cache:
+                return self._run_cache[cache_key]
             try:
                 # Try incremental fetch (Alpaca Data API)
                 from data.alpaca_data import ALPACA_DATA_AVAILABLE
@@ -381,7 +416,117 @@ class UnifiedPipeline:
         except Exception:
             self._data_freshness[cache_key] = "unknown"
 
+        self._run_cache[cache_key] = df
         return df
+
+    def _run_timesfm_batch(self, configs: list[TickerConfig]) -> None:
+        """Run TimesFM batch forecast using 1min data already in the run cache.
+
+        Results stored in self._tfm_results = {ticker: result_dict}.
+        Must be called AFTER the main pipeline run so that _run_cache is populated.
+
+        Data priority for each ticker:
+          1. _run_cache['ticker_1m']  — fetched this run (zero extra API calls)
+          2. CSV on disk              — from last run (no API call, may be ~1h stale)
+          3. Skip ticker              — no data available
+        """
+        self._tfm_results = {}
+        if self.timesfm is None:
+            return
+
+        unique_tickers = list({cfg.ticker for cfg in configs})
+        prices_1min: dict[str, object] = {}
+        for ticker in unique_tickers:
+            df = None
+            cache_key = f"{ticker}_1m"
+            if cache_key in self._run_cache:
+                df = self._run_cache[cache_key]
+            else:
+                try:
+                    df = self.fetcher.load_from_csv(ticker, '1m')
+                    df = TechnicalIndicators.add_all_indicators(df)
+                except FileNotFoundError:
+                    logger.debug("TimesFM: no 1min data for %s (no cache, no CSV)", ticker)
+                except Exception as e:
+                    logger.debug("TimesFM: CSV load failed for %s: %s", ticker, e)
+
+            if df is not None and len(df) >= 512:
+                prices_1min[ticker] = df['close'].values
+
+        if not prices_1min:
+            logger.debug("TimesFM: no 1min data available for any ticker")
+            return
+
+        logger.info("TimesFM batch forecast for %d tickers", len(prices_1min))
+        try:
+            self._tfm_results = self.timesfm.predict_batch(prices_1min, horizon=60)
+            logger.info("TimesFM ready — %d forecasts", len(self._tfm_results))
+        except Exception as e:
+            logger.warning("TimesFM batch forecast failed: %s", e)
+            self._tfm_results = {}
+
+    def _apply_timesfm(self, results: list['PipelineResult']) -> None:
+        """Apply TimesFM results to already-computed pipeline results.
+
+        Called as post-processing in run_all() after _run_timesfm_batch().
+        Two effects for 1m/1h signals only (1d: directional accuracy ~44%, not used):
+          - Confluence bonus: +1 star if TimesFM direction matches technical signal
+          - Dynamic SL/TP: overwrite fixed-% levels with quantile-based prices
+        """
+        if not self._tfm_results:
+            return
+
+        for r in results:
+            if r.interval not in ('1m', '1h') or r.final_direction == 'HOLD':
+                continue
+            tfm = self._tfm_results.get(r.ticker)
+            if tfm is None:
+                continue
+
+            tech_dir = +1 if r.final_direction == 'BUY' else -1
+
+            # Confluence bonus
+            if tfm['direction'] == tech_dir and r.confluence_score < 5:
+                r.confluence_score += 1
+                logger.debug(
+                    "TimesFM +1 confluence for %s %s → %d stars",
+                    r.ticker, r.interval, r.confluence_score,
+                )
+
+            # Dynamic SL/TP — direction-aware quantile selection.
+            # BUY:  SL = 10th pct at t=1 (below entry), TP = 80th pct at t=end (above entry)
+            # SELL: SL = 80th pct at t=1 (above entry), TP = 10th pct at t=end (below entry)
+            # Fallback to fixed % if quantiles are invalid or missing.
+            quantiles = tfm.get('quantiles')
+            entry = r.technical_signal.entry_price
+            sl_pct = SCALPING_SL_PERCENT if r.interval in ('1m', '1h') else SWING_SL_PERCENT
+            tp_pct = SCALPING_TP_PERCENT if r.interval in ('1m', '1h') else SWING_TP_PERCENT
+            if r.final_direction == 'BUY':
+                fallback_sl = entry * (1 - sl_pct)
+                fallback_tp = entry * (1 + tp_pct)
+            else:
+                fallback_sl = entry * (1 + sl_pct)
+                fallback_tp = entry * (1 - tp_pct)
+
+            sl, tp = fallback_sl, fallback_tp  # default to fixed %
+            if quantiles is not None and entry > 0:
+                if r.final_direction == 'BUY':
+                    q_sl = float(quantiles[0, 1])   # 10th pct at t=1
+                    q_tp = float(quantiles[-1, 8])  # 80th pct at t=end
+                    if q_sl < entry < q_tp:
+                        sl, tp = q_sl, q_tp
+                else:  # SELL
+                    q_sl = float(quantiles[0, 8])   # 80th pct at t=1
+                    q_tp = float(quantiles[-1, 1])  # 10th pct at t=end
+                    if q_tp < entry < q_sl:
+                        sl, tp = q_sl, q_tp
+
+            r.technical_signal.stop_loss = sl
+            r.technical_signal.take_profit = tp
+            logger.debug(
+                "TimesFM SL/TP for %s %s %s: SL=%.4f TP=%.4f",
+                r.ticker, r.interval, r.final_direction, sl, tp,
+            )
 
     def _apply_ml(self, ticker: str, interval: str, df: pd.DataFrame) -> dict | None:
         """Apply ML prediction (prefers cross-sectional XGBoost, falls back to per-ticker)."""
@@ -564,7 +709,7 @@ class UnifiedPipeline:
             if avg_conf >= 0.70:
                 stars += 1
 
-        return stars
+        return min(stars, 5)
 
     # ─── Output formatting ───────────────────────────────────────
 
