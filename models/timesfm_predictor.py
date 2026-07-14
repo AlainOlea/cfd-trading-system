@@ -36,6 +36,13 @@ CONTEXT_LEN = 512   # bars of history fed to the model (~8.5h at 1min, ~2y at 1d
 DEFAULT_HORIZON = 60  # default forecast steps (1 hour at 1min interval)
 
 
+def _pad_to_context(arr: np.ndarray) -> np.ndarray:
+    """Pad a price series to CONTEXT_LEN (left-pad with first value) and slice to last CONTEXT_LEN bars."""
+    if len(arr) < CONTEXT_LEN:
+        arr = np.pad(arr, (CONTEXT_LEN - len(arr), 0), constant_values=arr[0])
+    return arr[-CONTEXT_LEN:]
+
+
 class TimesFMPredictor:
     """
     Lazy-loading wrapper around TimesFM 2.5 for use in the trading pipeline.
@@ -52,6 +59,8 @@ class TimesFMPredictor:
         # All tickers at once (recommended — single GPU call)
         results = predictor.predict_batch({"SPY": prices_spy, "QQQ": prices_qqq}, horizon=60)
     """
+
+    SUPPORTED_INTERVALS = frozenset({'1m', '1h'})  # intervals where directional accuracy justifies use
 
     def __init__(self):
         self._model = None
@@ -106,15 +115,13 @@ class TimesFMPredictor:
             last_price: float, last bar close
         """
         self._load()
-        prices = np.asarray(prices, dtype=np.float32).flatten()
-        if len(prices) < CONTEXT_LEN:
+        arr = np.asarray(prices, dtype=np.float32).flatten()
+        if len(arr) < CONTEXT_LEN:
             logger.warning(
                 "predict() received %d bars, need %d — padding with first value",
-                len(prices), CONTEXT_LEN,
+                len(arr), CONTEXT_LEN,
             )
-            prices = np.pad(prices, (CONTEXT_LEN - len(prices), 0), constant_values=prices[0])
-
-        ctx = prices[-CONTEXT_LEN:]
+        ctx = _pad_to_context(arr)
         try:
             pf, qf = self._model.forecast(horizon=horizon, inputs=[ctx])
         except Exception as exc:
@@ -145,12 +152,7 @@ class TimesFMPredictor:
         self._load()
 
         tickers = list(prices_dict.keys())
-        inputs  = []
-        for t in tickers:
-            arr = np.asarray(prices_dict[t], dtype=np.float32).flatten()
-            if len(arr) < CONTEXT_LEN:
-                arr = np.pad(arr, (CONTEXT_LEN - len(arr), 0), constant_values=arr[0])
-            inputs.append(arr[-CONTEXT_LEN:])
+        inputs  = [_pad_to_context(np.asarray(prices_dict[t], dtype=np.float32).flatten()) for t in tickers]
 
         try:
             pf, qf = self._model.forecast(horizon=horizon, inputs=inputs)
