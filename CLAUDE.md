@@ -21,7 +21,7 @@ pytest tests/ -v                    # correr tests
 - **Python**: 3.12.3 (`/usr/bin/python3.12`)
 - **venv**: `source venv/bin/activate`
 - **pandas-ta**: 0.4.71b0, **yfinance**: 1.1.0, **ccxt**: 4.5.37
-- **TensorFlow**: 2.20.0 (CPU mode), **XGBoost**: Primary ML model
+- **TensorFlow**: 2.21.0 (GPU-accelerated, RTX 5060 + CUDA 12.9/cuDNN 9.19), **XGBoost**: Primary ML model
 - **VectorBT**: 0.28.4 (backtesting)
 - **alpaca-py**: Data API (free tier: IEX feed, 200 calls/min, 15-min delay)
 
@@ -62,7 +62,8 @@ tests/                      # 147 tests (all passing)
 - Confluence: Multi-timeframe scoring (0-5 stars)
 
 ### Paper Trading Automation
-Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
+Windows Task Scheduler ejecuta `run_paper_hourly.ps1`/`run_paper_daily.ps1` (raíz del repo),
+que invocan `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper-trade` dentro de WSL:
 
 | Task | Schedule | Orders |
 |------|----------|--------|
@@ -122,4 +123,6 @@ reversion-to-bb_middle target and was previously overwriting it for every 1m/1h 
 - NO usar yfinance para produccion critica (se rompe frecuentemente)
 - NO commitear .env, API keys, modelos entrenados, ni data/raw/*.csv
 - NO usar `live_signals.py`, `live_signals_ensemble.py` - DEPRECATED (usar `pipeline`)
-- NO renombrar `run_cfd_hourly.bat`, `run_cfd_daily.bat` (rompe automation)
+- NO renombrar ni mover `run_paper_hourly.ps1`, `run_paper_daily.ps1`, `setup_tasks.ps1` (raíz
+  del repo) — están conectados a tareas reales de Windows Task Scheduler (`CFD Paper Hourly`,
+  `CFD Paper Daily`); moverlos rompe la automatización sin ningún error visible en el repo

@@ -130,61 +130,42 @@ TP:   3% arriba entry
 
 ## 🤖 ML Filtering
 
+**Nota de arquitectura (actualizado):** el filtro ML primario hoy es **XGBoost cross-sectional**
+(`PRIMARY_ML_MODEL = 'xgboost'` en `config/settings.py`, entrenado sobre los 19 tickers juntos —
+ver `docs/reference/ML_RESEARCH.md`), no LSTM. **TimesFM** (`models/timesfm_predictor.py`) corre
+después como validador adicional en 1m/1h, sumando una estrella de confluencia si coincide en
+dirección y ajustando el SL/TP en las estrategias de momentum. La mecánica de "compara técnico
+vs ML, rechaza si discrepan fuerte" descrita abajo sigue siendo correcta — solo cambió cuál
+modelo produce la predicción.
+
 ### Cómo Funciona
 
 ```
 1. Estrategia genera: BUY (confidence 0.8)
-2. ML modelo predice: SELL (0.52)
+2. XGBoost predice: SELL (0.52)
 3. Comparación:
    - Técnico: BUY
    - ML: SELL
-   ❌ CONFLICTO → Señal RECHAZADA
+   ❌ CONFLICTO → Señal RECHAZADA (si la discrepancia de ML es >65% de confianza)
 
 vs.
 
 1. Estrategia genera: BUY (confidence 0.8)
-2. ML modelo predice: BUY (0.60)
+2. XGBoost predice: BUY (0.60)
 3. Comparación:
    - Técnico: BUY
    - ML: BUY
-   ✅ ACUERDO → Señal ACEPTADA + ML FILTERED
+   ✅ ACUERDO → Señal ACEPTADA
 ```
 
-### Accuracy por Modelo (Actual)
+### Accuracy actual (XGBoost cross-sectional)
 
-| Modelo | Accuracy | Recomendación |
-|--------|----------|---------------|
-| GLD | 64% | ✅ Usar para filtrar |
-| MSFT | 60% | ✅ Usar para filtrar |
-| QQQ | 56% | ✅ Usar para filtrar |
-| AAPL | 52% | ✅ Usar con cuidado |
-| Promedio | 50.36% | ⚠️ Mejor que aleatorio |
+Ver `docs/reference/ML_RESEARCH.md` y `docs/analysis/SYSTEM_AUDIT_GUIDE.md` para las cifras
+vigentes (80.3% accuracy en 1h, 73.4% en 1d al momento de escribir esto) — la tabla de accuracy
+por ticker que estaba acá era de la era LSTM (modelos por-ticker individuales, ya no es el
+camino primario) y quedó desactualizada.
 
-**Umbral mínimo:** 52% accuracy recomendado
-
-## 💡 Mejoras Sugeridas
-
-### Para Mejorar Accuracy
-
-1. **Más Datos de Entrenamiento**
-   - Entrenar con períodos 5m, 15m, 1h
-   - Combinar múltiples años de datos
-   - Cross-validation entre períodos
-
-2. **Feature Engineering**
-   - Agregar volatilidad (ATR)
-   - Volumen relativo
-   - Money Flow Index
-
-3. **Arquitectura del Modelo**
-   - Aumentar LSTM layers
-   - Attention mechanism
-   - Ensemble de modelos
-
-4. **Entrenamiento Mejorado**
-   - Más epochs (50 → 100)
-   - Learning rate scheduling
-   - Data augmentation
+**Umbral mínimo:** `min-confidence` default 60% (ver `main.py paper-trade --min-confidence`).
 
 ## 📈 Generación de Señales en Vivo
 

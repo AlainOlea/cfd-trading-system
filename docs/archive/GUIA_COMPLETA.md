@@ -1,3 +1,7 @@
+> **ARCHIVADO** — describe `live_signals.py`/`scripts/improve_best_models.py` como flujo
+> principal y "10 comandos" (hoy son 17+). Superseded por `main.py` + XGBoost + TimesFM. Solo
+> referencia histórica — para empezar hoy, ver `CLAUDE.md` (sección "Setup Commands").
+
 # Guía Completa: CFD Trading System
 
 ## Tabla de Contenidos

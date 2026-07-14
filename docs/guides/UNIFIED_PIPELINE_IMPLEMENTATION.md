@@ -1,8 +1,12 @@
 # Unified Signal Pipeline - Implementation Guide
 
-**Last Updated**: 2026-02-15
+**Last Updated**: 2026-07-13 (updated: LSTM+XGBoost ensemble layer removed — see note below)
 **Status**: ✅ Production Ready
-**Version**: 1.0
+
+> **Nota (2026-07-13):** la "ENSEMBLE LAYER" descrita en este doc (`use_ensemble`,
+> `ensemble_result`, `--no-ensemble`) fue código que quedó desconectado tras el pivote a
+> XGBoost + TimesFM y se retiró por completo — nunca populaba nada en producción. Este doc se
+> corrigió para reflejar el estado actual: **Technical + ML (XGBoost) + TimesFM validation + News**.
 
 ---
 
@@ -17,7 +21,7 @@ The **Unified Signal Pipeline** consolidates 6 fragmented signal generation flow
 
 ### Key Improvements
 ✅ **Fresh Data Fetching**: Always pulls live data (fixes stale cache issues)
-✅ **Multi-Layer Analysis**: Technical + ML + Ensemble + News in one flow
+✅ **Multi-Layer Analysis**: Technical + ML (XGBoost) + TimesFM validation + News in one flow
 ✅ **Confluence Scoring**: Rates signal strength 0-5 stars (multi-timeframe agreement)
 ✅ **Parallel Processing**: Runs multiple tickers concurrently (4x faster)
 ✅ **Configurable Per-Ticker**: Choose strategies, intervals, analysis layers for each ticker
@@ -65,28 +69,31 @@ One `UnifiedPipeline` class that handles **all** flows:
 │                                                             │
 ├─ ML LAYER (Optional) ─────────────────────────────────────┤
 │                                                             │
-│  Single model prediction (direction + confidence)         │
+│  XGBoost prediction (direction + confidence)               │
+│  Cross-sectional model first, per-ticker fallback         │
+│  Can veto technical signal to HOLD on strong disagreement │
 │  Graceful degradation if model not available             │
-│                                                             │
-├─ ENSEMBLE LAYER (Optional) ───────────────────────────────┤
-│                                                             │
-│  LSTM + XGBoost voting (consensus: WEAK/STRONG)          │
-│  Overrides technical if strong disagreement              │
 │                                                             │
 ├─ CONFLUENCE SCORING ──────────────────────────────────────┤
 │                                                             │
-│  0-5 stars based on:                                      │
+│  0-4 stars based on:                                      │
 │  • Multiple timeframes agreement                          │
 │  • ML confirmation                                        │
-│  • Ensemble consensus                                     │
-│  • News alignment                                         │
 │  • High confidence (>70%)                                 │
+│  (a 5th star can be added by TimesFM below)                │
 │                                                             │
 ├─ NEWS SENTIMENT (Optional) ───────────────────────────────┤
 │                                                             │
 │  NewsAPI + Google Gemini (only for actionable signals)    │
 │  Sentiment: BULLISH/BEARISH/NEUTRAL                       │
 │  Alignment: aligns/disagrees                              │
+│                                                             │
+├─ TIMESFM VALIDATION (post-processing, 1m/1h only) ────────┤
+│                                                             │
+│  Zero-shot price forecast, runs after all tickers finish   │
+│  +1 confluence star if forecast direction agrees           │
+│  Overwrites SL/TP with quantile levels — except for        │
+│  mean-reversion strategies (rsi_bb), which keep their own  │
 │                                                             │
 └─ OUTPUT & LOGGING ────────────────────────────────────────┘
     │
@@ -112,8 +119,7 @@ class TickerConfig:
     category: str                   # 'indices', 'stocks', 'crypto', 'commodities'
     intervals: list[str]            # ['1d', '1h', '15m']
     strategies: list[str]           # ['macd_vwap', 'rsi_bb']
-    use_ml: bool = True             # Enable ML predictions
-    use_ensemble: bool = True       # Enable ensemble voting
+    use_ml: bool = True             # Enable ML predictions (XGBoost)
     use_news: bool = True           # Enable news sentiment
     confluence_min_stars: int = 2   # Min stars to consider actionable
 ```
@@ -126,7 +132,6 @@ config = TickerConfig(
     intervals=['1d', '1h'],
     strategies=['macd_vwap', 'rsi_bb'],
     use_ml=True,
-    use_ensemble=True,
     use_news=True,
     confluence_min_stars=2,
 )
@@ -141,8 +146,7 @@ class PipelineResult:
     ticker: str                     # 'GLD'
     interval: str                   # '1d'
     technical_signal: Signal        # From strategy
-    ml_prediction: dict | None      # From ML model
-    ensemble_result: dict | None    # From LSTM+XGBoost
+    ml_prediction: dict | None      # From XGBoost
     news_sentiment: dict | None     # From NewsAPI+Gemini
     confluence_score: int = 0       # 0-5 stars
     final_direction: str = 'HOLD'   # BUY/SELL/HOLD
@@ -162,7 +166,6 @@ class UnifiedPipeline:
     def __init__(
         self,
         use_ml: bool = True,
-        use_ensemble: bool = True,
         use_news: bool = True,
         send_telegram: bool = True,
         max_workers: int = 4,
@@ -204,16 +207,18 @@ class UnifiedPipeline:
       - Clean & validate data
       - Add technical indicators
       - Apply strategies (get best signal)
-      - Apply ML filter (if enabled)
-      - Apply ensemble prediction (if enabled)
-      - Compute final direction (voting logic)
+      - Apply ML filter (XGBoost, if enabled)
+      - Compute final direction (technical + ML vote)
       - Fetch news sentiment (if enabled + actionable)
       - Compute confluence score
 
 3. Compute multi-timeframe confluence
-   └─ Rate signal strength 0-5 stars
+   └─ Rate signal strength 0-4 stars
 
-4. Output results
+4. Run TimesFM batch (after all tickers, 1m/1h only)
+   └─ Confluence bonus (+1 star, up to 5) + dynamic SL/TP for momentum strategies
+
+5. Output results
    └─ Terminal display, CSV log, Telegram notifications
 ```
 
@@ -294,10 +299,9 @@ python3 main.py pipeline --ticker GLD
 
 #### Disable Layers (Optional)
 ```bash
-python3 main.py pipeline --no-ml         # Skip ML predictions
-python3 main.py pipeline --no-ensemble   # Skip LSTM+XGBoost
+python3 main.py pipeline --no-ml         # Skip ML (XGBoost) predictions
 python3 main.py pipeline --no-news       # Skip news sentiment
-python3 main.py pipeline --no-ml --no-ensemble --no-news  # Tech only
+python3 main.py pipeline --no-ml --no-news  # Tech only
 ```
 
 #### Disable Telegram
@@ -311,11 +315,11 @@ Edit `config/settings.py` to configure which tickers run in the pipeline:
 
 ```python
 PIPELINE_TICKERS_RAW = [
-    # (ticker, category, intervals, strategies, use_ml, use_ensemble, use_news, confluence_min)
-    ('GLD', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'ma_crossover'], True, True, False, 2),
-    ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, False, True, 2),
-    ('MSFT', 'stocks', ['1d'], ['rsi_bb'], True, True, True, 3),
+    # (ticker, category, intervals, strategies, use_ml, use_news, confluence_min)
+    ('GLD', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'ma_crossover'], True, False, 2),
+    ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, 2),
+    ('MSFT', 'stocks', ['1d'], ['rsi_bb'], True, True, 3),
 ]
 ```
 
@@ -326,8 +330,7 @@ PIPELINE_TICKERS_RAW = [
     category,            # 'indices', 'stocks', 'crypto', 'commodities'
     intervals,           # ['1d', '1h', '15m']
     strategies,          # ['macd_vwap', 'rsi_bb', 'ma_crossover']
-    use_ml,              # True/False - enable ML filter
-    use_ensemble,        # True/False - enable LSTM+XGBoost voting
+    use_ml,              # True/False - enable ML filter (XGBoost)
     use_news,            # True/False - fetch news sentiment
     confluence_min_stars # 0-5 (minimum to consider actionable)
 )
@@ -341,7 +344,6 @@ from signals.pipeline import UnifiedPipeline, TickerConfig
 # Create pipeline
 pipeline = UnifiedPipeline(
     use_ml=True,
-    use_ensemble=True,
     use_news=True,
     send_telegram=True,
     max_workers=4,
@@ -354,7 +356,6 @@ config = TickerConfig(
     intervals=['1d', '1h'],
     strategies=['macd_vwap', 'rsi_bb'],
     use_ml=True,
-    use_ensemble=True,
     use_news=True,
     confluence_min_stars=2,
 )
@@ -383,10 +384,10 @@ These scripts are now **deprecated** and should not be used:
 
 | Legacy Script | Replacement | Status |
 |---------------|-------------|--------|
-| `live_signals.py` | `pipeline --ticker GLD` | ❌ Deprecated |
-| `live_signals_ensemble.py` | `pipeline` (ensemble included) | ❌ Deprecated |
-| `live_signals_expanded.py` | `pipeline` (news included) | ❌ Deprecated |
-| `live_signals_multifreq.py` | `pipeline` (confluence included) | ❌ Deprecated |
+| `live_signals.py` | `pipeline --ticker GLD` | ❌ Deprecated, deleted |
+| `live_signals_ensemble.py` | `pipeline` (XGBoost + TimesFM included) | ❌ Deprecated, deleted |
+| `live_signals_expanded.py` | `pipeline` (news included) | ❌ Deprecated, deleted |
+| `live_signals_multifreq.py` | `pipeline` (confluence included) | ❌ Deprecated, deleted |
 
 ### Migration Guide
 
@@ -412,20 +413,21 @@ python3 main.py pipeline --category commodities --category indices
 
 #### Before: Calling `generator.generate()` directly
 ```python
-# Old way (problematic):
+# SignalGenerator still exists, but is a single-ticker debug/ad-hoc tool now —
+# it duplicates most of what UnifiedPipeline._run_single() does independently.
+# Prefer UnifiedPipeline for anything beyond a quick manual check.
 from signals.generator import SignalGenerator
 gen = SignalGenerator()
 signal = gen.generate('macd_vwap', 'GLD', '1d', use_ml=True)
-# ❌ Uses CSV cache, no ensemble, no news
 ```
 
 ```python
-# New way (recommended):
+# Recommended (production path):
 from signals.pipeline import UnifiedPipeline, TickerConfig
 pipeline = UnifiedPipeline()
-config = TickerConfig('GLD', 'commodities', ['1d'], ['macd_vwap'], True, True, True, 2)
+config = TickerConfig('GLD', 'commodities', ['1d'], ['macd_vwap'], True, True, 2)
 results = pipeline.run_ticker(config)
-# ✅ Fresh data, ML, ensemble, news (all layers)
+# ✅ Fresh data, XGBoost ML filter, news, TimesFM validation (all layers)
 ```
 
 ---
@@ -449,8 +451,8 @@ python3 main.py pipeline --category commodities
 # Test with single ticker
 python3 main.py pipeline --ticker GLD
 
-# Test without ML/ensemble (tech-only)
-python3 main.py pipeline --no-ml --no-ensemble
+# Test without ML (tech-only)
+python3 main.py pipeline --no-ml
 
 # Test Telegram notifications (if configured)
 python3 main.py pipeline --telegram
@@ -476,28 +478,28 @@ ls -la data/raw/GLD_1d.csv
 All signals are logged to `logs/signals.csv` with these columns:
 
 ```
-timestamp, ticker, interval, strategy, final_direction, entry_price,
-stop_loss, take_profit, confidence, ml_direction, ensemble_consensus,
-news_sentiment, confluence_score
+timestamp, strategy, ticker, interval, direction, entry_price, stop_loss,
+take_profit, confidence, risk_reward, ml_filtered, ml_confidence,
+ensemble_consensus, news_sentiment, confluence_score
 ```
 
-Example:
-```csv
-2026-02-15T14:30:00,GLD,1d,macd_vwap,BUY,202.50,201.00,204.50,0.725,BUY,STRONG,BULLISH,4
-2026-02-15T14:30:15,MSFT,1h,rsi_bb,SELL,420.00,425.00,415.00,0.683,SELL,WEAK,BEARISH,3
-```
+(`ensemble_consensus` is a leftover column kept for CSV-schema stability — it's always empty now
+that the ensemble layer is gone. See `signals/manager.py` for the exact header.)
 
 ### Query Signal History
+
+There's no dedicated `signal-history` command (it never existed despite earlier drafts of this
+doc implying otherwise). Options:
+
 ```bash
-# Last 10 signals
-python3 main.py signal-history --ticker GLD --count 10
-
-# All signals
+# Raw CSV
 cat logs/signals.csv | head -20
-
-# Filter by direction
 grep ",BUY," logs/signals.csv
 grep ",SELL," logs/signals.csv
+
+# Aggregated win-rate/P&L analysis by strategy, ticker, hour, day
+# (joins closed Alpaca trades against this same CSV)
+python3 scripts/signal_accuracy_report.py --days 90
 ```
 
 ---
@@ -520,7 +522,7 @@ grep ",SELL," logs/signals.csv
 ─────────────────────────────────────────────────────────────
   Technical:  BUY  (macd_vwap, conf=72.5%)
   ML:         BUY  (conf=68.3%)
-  Ensemble:   BUY  (consensus=STRONG, conf=71.0%)
+  TimesFM:    🟢 +1.2% | $200.10 – $206.80
   News:       BULLISH (alignment=aligns)
 ═════════════════════════════════════════════════════════════
 ```
@@ -542,7 +544,6 @@ TP:     `$204.50`
 R/R:    `1:2.5`
 Conf:   `72%`
 ML:     `BUY (68%)`
-Ensemble: `BUY (STRONG)`
 
 📰 News: BULLISH (aligns with signal)
 
@@ -561,8 +562,8 @@ _2026-02-15 14:30:00_
 
 **Solutions:**
 1. Lower `confluence_min_stars` in config
-2. Disable layers (`--no-ml`, `--no-ensemble`)
-3. Check indicator values manually: `python3 main.py signal --ticker GLD --verbose`
+2. Disable layers (`--no-ml`, `--no-news`)
+3. Check indicator values manually: `python3 main.py signal --strategy macd_vwap --ticker GLD --interval 1h`
 
 ### Problem: "Fresh data not fetching"
 **Check:**
@@ -581,11 +582,11 @@ grep "Fetch" logs/trading_system.log | tail -20
 
 **Solution:**
 ```bash
-# Train a new model
-python3 main.py train-lstm --ticker GLD --interval 1d
+# Train the cross-sectional XGBoost model (primary ML path)
+python3 main.py train-xgb-cross --interval 1d
 
 # Verify file exists
-ls -la models/saved/GLD_1d/
+ls -la models/saved/all_tickers_1d_xgb/
 ```
 
 ### Problem: "Telegram not sending"
@@ -622,10 +623,10 @@ python3 -c "from signals.telegram_bot import TelegramNotifier; TelegramNotifier(
 
 ## 📚 Related Documentation
 
-- [INTEGRATION_SUMMARY.md](INTEGRATION_SUMMARY.md) - System overview
+- [../reference/MODULES_API.md](../reference/MODULES_API.md) - Full module API, kept in sync with the code
 - [FRESH_DATA_FIX.md](../analysis/FRESH_DATA_FIX.md) - Detailed data fix explanation
 - [SIGNAL_GENERATION_GUIDE.md](SIGNAL_GENERATION_GUIDE.md) - Strategy details
-- [ML_RETRAINING_IMPLEMENTATION.md](ML_RETRAINING_IMPLEMENTATION.md) - Model training
+- [ML_RETRAINING_IMPLEMENTATION.md](ML_RETRAINING_IMPLEMENTATION.md) - Model training (LSTM legacy path, see note in `docs/README.md`)
 
 ---
 
@@ -634,7 +635,7 @@ python3 -c "from signals.telegram_bot import TelegramNotifier; TelegramNotifier(
 The Unified Signal Pipeline replaces 6 fragmented scripts with a single, consistent, configurable system that:
 
 ✅ **Always uses fresh data** (not stale cache)
-✅ **Combines all analysis layers** (technical + ML + ensemble + news)
+✅ **Combines all analysis layers** (technical + ML/XGBoost + TimesFM validation + news)
 ✅ **Rates signal strength** with confluence scoring
 ✅ **Processes multiple tickers in parallel** (4x faster)
 ✅ **Configurable per-ticker** (strategies, intervals, layers)

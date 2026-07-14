@@ -102,7 +102,7 @@ take_profit = quantiles[0, -1, 9]  # 90th percentile
 - Walk-forward: avg MAPE 2.0% (5 windows, 44% directional accuracy)
 - XReg comparison: RSI/MACD covariates are WORSE (-0.39% MAPE degradation)
 - Multi-ticker batch: 1.29s for 6 tickers simultaneously
-- Full deep research: `/scripts/TIMESFM_DEEP_RESEARCH.md`
+- Full deep research: `docs/research/TIMESFM_DEEP_RESEARCH.md`
 
 ### Phase 2: Training (NEXT - 1-2 days)
 Create training script with **3 comparison batches:**
@@ -223,9 +223,9 @@ for i in range(horizon):
 
 ### Created by This Session
 - `/scripts/timesfm_poc.py` — Working POC
-- `/scripts/TIMESFM_2P5_API_REFERENCE.md` — Complete API docs
-- `/scripts/TIMESFM_GUIDE.md` — Setup & usage
-- `/scripts/TIMESFM_TRAINING_STRATEGY.md` — Multi-batch comparison plan
+- `docs/reference/TIMESFM_2P5_API_REFERENCE.md` — Complete API docs
+- `/docs/guides/TIMESFM_GUIDE.md` — Setup & usage
+- `/docs/guides/TIMESFM_TRAINING_STRATEGY.md` — Multi-batch comparison plan
 
 ---
 

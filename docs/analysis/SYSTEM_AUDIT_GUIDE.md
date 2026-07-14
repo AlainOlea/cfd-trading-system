@@ -37,13 +37,15 @@ Data Feed → Indicators → Strategy → Signal → ML Filter → Paper Trade
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Max risk per trade | 2% of equity | Position sizing based on SL distance |
-| Max position size | 5% of equity | Hard cap per position |
-| Max concurrent positions | 3 | Limit correlated exposure |
-| Stop Loss | 0.5% intraday, 1.5% swing | Dynamic based on interval |
-| Take Profit | 1% intraday, 3% swing | 1:2 risk-reward ratio |
-| Min confidence (ML) | 65% | Signals below this are rejected |
-| Min confluence | 3 stars | Multi-timeframe agreement required |
+| Max risk per trade | 2% of equity (nominal) | For scalping strategies (tight 0.5-0.7% stops) the 5% position cap binds before this ever does — real $ risk per trade is closer to 0.03% of equity |
+| Max position size | 5% of equity | Hard cap per position — this is what actually sizes every trade in practice |
+| Max gross exposure | 50% of equity | Aligned with max concurrent positions (10 x 5% = 50%) |
+| Max concurrent positions | 10 | Limit correlated exposure |
+| Max crypto aggregate / single | 10% / 3% of equity | |
+| Stop Loss | 0.5% intraday (macd_vwap), 0.7% (rsi_bb), 1.5% swing | Dynamic based on strategy/interval |
+| Take Profit | 1% intraday (macd_vwap), bb_middle (rsi_bb), 3% swing | rsi_bb's TP is a distance to the Bollinger middle band, not a fixed % |
+| Min confidence (ML) | 60% | Signals below this are rejected |
+| Min confluence | 3 stars (default) | Multi-timeframe agreement required |
 
 ---
 
@@ -93,10 +95,11 @@ As a financial advisor, please assess:
 - Is the risk-reward ratio (1:2) realistic?
 
 ### 2. Risk Management
-- Is 2% max risk per trade appropriate for paper trading?
-- Should crypto have different risk parameters than stocks?
-- Is the 3-position max concurrent limit sufficient diversification?
-- Should there be max drawdown limits (e.g., halt at -5%)?
+- Is 2% max risk per trade appropriate for paper trading? (note: in practice the 5% position-size
+  cap binds first for scalping strategies — see the table above — so this parameter is mostly nominal today)
+- Should crypto have different risk parameters than stocks? (it already does: 10%/3% aggregate/single vs 50%/5% for stocks)
+- Is the 10-position max concurrent limit (raised from 3, aligned with the 50% gross exposure cap) sufficient diversification?
+- Drawdown limits already exist (5% warning, 10% halt) — has the halt ever actually triggered in practice?
 
 ### 3. Position Sizing
 - The bot uses a formula: `shares = min(risk_based, capital_based)` where risk_based = (equity * 2%) / (entry - SL)
@@ -106,7 +109,9 @@ As a financial advisor, please assess:
 ### 4. ML Filter Effectiveness
 - XGBoost cross-sectional model: 80.3% accuracy (1h), 73.4% accuracy (1d)
 - Is this sufficient for signal filtering?
-- Should the ML confidence threshold be higher than 65%?
+- Should the ML confidence threshold be higher than 60%? (also note: observed confidence values
+  cluster in a narrow 60-63.5% band with no measured correlation to trade outcome — the score's
+  calibration may need revisiting before raising the threshold would help)
 
 ### 5. Asset Allocation
 - Current: 15 stocks/ETFs + 4 crypto

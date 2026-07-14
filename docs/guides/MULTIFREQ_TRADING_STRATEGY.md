@@ -290,12 +290,19 @@ python main.py signal --strategy macd_vwap --ticker GLD --interval 15m
 
 **Los modelos ML también funcionan con otros períodos (necesitamos entrenarlos).**
 
-### Script para Multi-Período Automático
+### Cómo se implementó multi-período (actualización: ya no es un script separado)
+
+`live_signals_multifreq.py` nunca se construyó como script aparte — el enfoque multi-período
+terminó implementado directamente en `config/settings.py`: cada ticker en `PIPELINE_TICKERS_RAW`
+declara su propia lista de intervalos (ej. `['1d', '1h', '1m']`), y `UnifiedPipeline` los corre
+todos automáticamente por ticker — no hace falta pasar un flag de intervalos por CLI.
 
 ```bash
-# Ver live_signals_multifreq.py que crearemos
-# Genera señales para 1d, 1h, 15m automáticamente
-python live_signals_multifreq.py
+# Corre todos los intervalos configurados para todos los tickers
+python3 main.py pipeline
+
+# Corre todos los intervalos configurados, solo para un ticker
+python3 main.py pipeline --ticker GLD
 ```
 
 ## 📈 Comparación: 1d vs Multi-Período
@@ -356,9 +363,10 @@ Win rate: 56% (muchos más trades)
 
 ### Immediate (Hoy)
 
-1. **Generar señales en múltiples períodos**
+1. **Generar señales en múltiples períodos** (ya implementado — cada ticker en
+   `PIPELINE_TICKERS_RAW` declara sus propios intervalos, no hace falta un flag)
    ```bash
-   python3 main.py pipeline --intervals 1d,1h
+   python3 main.py pipeline
    ```
 
 2. **Entrenar modelos para 1h y 15m**
@@ -415,11 +423,11 @@ Solo necesitas cambiar el parámetro `interval` de "1d" a "1h", "15m", etc.
 **Empezar con 1d + 1h (Opción C Híbrida):**
 
 ```bash
-# Generar señales multi-período
-python live_signals_multifreq.py --periods 1d,1h
+# Generar señales multi-período (ya corre 1d+1h+1m automáticamente por ticker)
+python3 main.py pipeline
 
-# Monitorear en tiempo real
-python main.py watch --use-ml --intervals 1d,1h --every 3600
+# Monitorear en tiempo real (un intervalo a la vez — ver docs/WATCHER_SETUP.md)
+python3 main.py watch --use-ml --interval 1h --every 3600
 
 # Backtesting
 python main.py backtest --strategy macd_vwap --ticker GLD --interval 1h --use-ml

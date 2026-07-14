@@ -1,6 +1,11 @@
+> **ARCHIVADO** — este archivo se creía a sí mismo "READ THIS FIRST", pero referencia
+> `run_script.py`/`scripts.yaml`, que no existen en el repo. `CLAUDE.md` es hoy el documento
+> que realmente cumple ese rol ("Read this file, then docs/README.md for navigation"). Solo
+> referencia histórica — no seguir las instrucciones de abajo.
+
 # Agent Context - Quick Reference
 
-**READ THIS FIRST when starting a Claude session**
+**~~READ THIS FIRST when starting a Claude session~~ — ver CLAUDE.md en su lugar**
 
 ## 🔴 MANDATORY: You MUST read these documents
 

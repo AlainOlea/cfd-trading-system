@@ -293,7 +293,7 @@ AutoModel.from_pretrained('google/timesfm-2.5-200m-pytorch')"
 ## Files Created
 
 - `scripts/timesfm_poc.py` — Main evaluation script
-- `scripts/TIMESFM_GUIDE.md` — This file
+- `docs/guides/TIMESFM_GUIDE.md` — This file
 - (Future) `models/timesfm_predictor.py` — Integration module
 - (Future) `scripts/train_timesfm_lora.py` — Fine-tuning script
 

@@ -539,7 +539,7 @@ class UnifiedPipeline:
 
 - **Installation**: `pip install 'timesfm[torch]'`
 - **POC Script**: `scripts/timesfm_poc.py`
-- **Training Guide**: `scripts/TIMESFM_TRAINING_STRATEGY.md`
+- **Training Guide**: `docs/guides/TIMESFM_TRAINING_STRATEGY.md`
 - **Official Repo**: https://github.com/google-research/timesfm
 - **Model Card**: https://huggingface.co/google/timesfm-2.5-200m-pytorch
 

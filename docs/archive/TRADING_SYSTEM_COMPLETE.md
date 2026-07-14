@@ -1,3 +1,7 @@
+> **ARCHIVADO** — describe un sistema de "9 modelos LSTM+Transformer", `live_signals.py`, y
+> 10 comandos CLI, todo superseded por `main.py` (17+ comandos) + XGBoost + TimesFM. Solo
+> referencia histórica — ver `CLAUDE.md` y `docs/reference/MODULES_API.md` para el estado actual.
+
 # 🚀 CFD Trading System - Guía Completa
 
 ## 📊 Estado Actual del Sistema

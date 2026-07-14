@@ -116,20 +116,20 @@ The system gracefully handles missing API keys:
 ### Run Signal Generation with News Context
 
 ```bash
-# All tickers
-python3 live_signals_expanded.py
+# All tickers (news runs automatically for actionable signals)
+python3 main.py pipeline
 
-# Specific tickers
-python3 live_signals_expanded.py --tickers "GLD,MSFT,BTC-USD"
+# Specific ticker
+python3 main.py pipeline --ticker GLD
 
-# Verbose mode (shows more details)
-python3 live_signals_expanded.py --verbose
+# Skip news for this run
+python3 main.py pipeline --no-news
 ```
 
 ## File Structure
 
-- **signals/news_analyzer.py** - Main NewsAnalyzer class
-- **live_signals_expanded.py** - Integrated signal generation with news context
+- **signals/news_analyzer.py** - Main NewsAnalyzer class, called by `UnifiedPipeline._apply_news()`
+  inside `signals/pipeline.py` — invoked via `main.py pipeline`, not a standalone script
 - **.env** - Your API keys (never commit this)
 - **.env.example** - Template with setup instructions
 
@@ -203,7 +203,7 @@ def fetch_news(self, ticker: str, limit: int = 5) -> List[Dict]:
 
 1. **Get API keys** from NewsAPI and Google AI
 2. **Add to `.env` file**
-3. **Test with sample ticker:** `python3 live_signals_expanded.py --tickers "GLD"`
+3. **Test with sample ticker:** `python3 main.py pipeline --ticker GLD`
 4. **Monitor Telegram messages** for news context
 5. **Adjust confidence thresholds** in config/settings.py as needed
 
@@ -215,12 +215,12 @@ cp .env.example .env
 # Edit .env with your API keys
 
 # 2. Test with one ticker
-python3 live_signals_expanded.py --tickers "GLD"
+python3 main.py pipeline --ticker GLD
 
 # 3. Check Telegram for signal with news context
 
-# 4. Run full ensemble for all tickers
-python3 live_signals_expanded.py
+# 4. Run for all tickers
+python3 main.py pipeline
 
 # 5. Monitor signals
 tail -f logs/signals.csv
@@ -230,5 +230,5 @@ tail -f logs/signals.csv
 
 For issues or customizations:
 1. Check the logs: `tail -100 logs/signals.csv`
-2. Run with verbose: `python3 live_signals_expanded.py --verbose`
+2. Run with a single ticker to isolate the issue: `python3 main.py pipeline --ticker GLD`
 3. Review signals/news_analyzer.py for implementation details

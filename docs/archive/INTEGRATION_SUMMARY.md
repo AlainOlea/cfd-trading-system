@@ -1,3 +1,8 @@
+> **ARCHIVADO** — describe `live_signals.py` como entry point y un ensemble LSTM+Transformer
+> como arquitectura ML; ninguno de los dos existe hoy. El sistema actual usa `main.py` + XGBoost
+> primario + validación TimesFM — ver `CLAUDE.md` y `docs/reference/MODULES_API.md`. Solo
+> referencia histórica, no describe el sistema actual.
+
 # News Sentiment Integration - Complete Summary
 
 ## 🎯 Implementation Complete

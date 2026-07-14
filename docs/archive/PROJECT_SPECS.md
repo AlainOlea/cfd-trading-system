@@ -1,4 +1,8 @@
-# CFD Trading System
+> **ARCHIVADO** — snapshot de la etapa más temprana del proyecto: sin Alpaca, sin XGBoost, sin
+> TimesFM, referencia `run_script.py` (no existe). El `CLAUDE.md` actual en la raíz del repo es
+> el documento vigente para setup y arquitectura. Solo referencia histórica.
+
+# CFD Trading System (snapshot histórico)
 
 ## ⚡ IMPORTANT: Initial Session Setup
 

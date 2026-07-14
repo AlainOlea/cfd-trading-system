@@ -1,6 +1,14 @@
 # NVIDIA CUDA GPU Configuration for RTX 5060
 
-## Status: ✅ Training Working (CPU Mode - GPU Detection Pending)
+> **Resuelto (2026-07-13):** todo lo de abajo describe el proceso de troubleshooting de 2026-02
+> cuando GPU no funcionaba y se usaba `tf-nightly>=2.22.0.dev` como workaround para compute
+> capability 12.0. Eso ya se resolvió: hoy el proyecto corre en **`tensorflow==2.21.0`** (release
+> estable, ver `requirements.txt`) con **GPU-acceleration activo** (confirmado en cada arranque:
+> "TensorFlow GPU configured: Mode: GPU-accelerated, GPU: RTX 5060 8GB, CUDA 12.9 + cuDNN 9.19").
+> No instalar `tf-nightly` — usar `pip install -r requirements.txt` directamente. El resto del
+> documento queda como referencia histórica del diagnóstico.
+
+## Status (histórico, 2026-02-14): ✅ Training Working (CPU Mode - GPU Detection Pending)
 
 ### Summary
 TensorFlow LSTM model training is now working successfully on your system. The model trains in CPU mode due to CUDA library availability in WSL2, but the training is fast enough for practical use (~5 seconds for 5 epochs). GPU acceleration has been configured and will activate once CUDA libraries are properly set up in WSL2.
