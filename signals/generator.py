@@ -70,7 +70,15 @@ class Signal:
 
 
 class SignalGenerator:
-    """Generates trading signals from fresh market data."""
+    """Single-ticker, technical-only signal generation — a debug/ad-hoc tool.
+
+    Used by `main.py signal` for a quick manual check on one ticker+strategy.
+    Not the production path: it independently reimplements the same
+    fetch -> clean -> indicators -> strategy flow that `UnifiedPipeline`
+    (signals/pipeline.py) runs for real trading, but has no ML filter, no
+    TimesFM validation, no news sentiment, and no confluence scoring. For
+    anything beyond a one-off manual check, use `UnifiedPipeline` instead.
+    """
 
     def __init__(self):
         self.fetcher = DataFetcher()
