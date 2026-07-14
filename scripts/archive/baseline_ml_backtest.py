@@ -1,4 +1,8 @@
 """
+ARCHIVADO (2026-07-13): requiere models/trainer.py, retirado junto con LSTM
+(Fase 4 de la limpieza arquitectónica). Roto tal cual — se conserva solo como
+referencia histórica.
+
 Baseline OOS financial backtest for already-trained LSTM/Transformer models.
 
 Reproduces the test split deterministically (chronological by ratio), runs

@@ -112,7 +112,7 @@ Detailed API documentation for all modules.
 - `run_ticker(config)` -> List[PipelineResult]. One per interval, shared data cache
 - `_fetch_data(ticker, interval)` -> **Alpaca Data API incremental** (fallback Yahoo Finance)
 - `_apply_ml()`, `_apply_news()` -> Graceful degradation layers. `_apply_ml()` uses XGBoost
-  (cross-sectional `all_tickers` model first, per-ticker fallback) per `PRIMARY_ML_MODEL`
+  (cross-sectional `all_tickers` model first, per-ticker fallback) — the only ML model supported
 - `_run_timesfm_batch()` / `_apply_timesfm()` -> TimesFM zero-shot validation, post-processing over
   1m/1h results only. Adds a confluence bonus on direction agreement and overwrites SL/TP with
   quantile-based levels — **except** for strategies with `mean_reversion=True` (e.g. rsi_bb), whose
@@ -125,9 +125,8 @@ Detailed API documentation for all modules.
 ## signals/generator.py - SignalGenerator
 
 - `Signal` dataclass: direction, entry_price, stop_loss, take_profit, confidence, risk_reward_ratio, news_sentiment, confluence_score
-- `SignalGenerator.generate(strategy_name, ticker, interval, days, use_ml)` -> Signal. Full pipeline: fetch -> clean -> indicators -> strategy -> latest signal
+- `SignalGenerator.generate(strategy_name, ticker, interval, days)` -> Signal. Full pipeline: fetch -> clean -> indicators -> strategy -> latest signal
 - `SignalGenerator.get_latest_actionable(strategy_name, ticker, interval, lookback)` -> Signal|None. Searches last N bars for BUY/SELL
-- `_apply_ml_filter(signal, df)` -> graceful degradation if ML model not available
 - `_estimate_days(interval)` -> auto-calculates days for sufficient indicator warmup (1m=7d, 5m=30d, 1h=90d, 1d=365d)
 - **Note**: Prefer `UnifiedPipeline` over `generate()` for new code (deprecated in favor of pipeline)
 
@@ -159,27 +158,6 @@ Detailed API documentation for all modules.
 - `get_performance(days)` -> win rate, profit factor, avg win/loss
 - Stocks: bracket orders with SL/TP. Crypto: notional market orders (no SL/TP — Alpaca limitation)
 - Swing trades (1d): GTC orders, 2x wider SL/TP via `_widen_sl_tp_for_swing()`
-
-## models/hybrid_model.py - HybridLSTMTransformer (DEPRECATED)
-
-- `TransformerEncoderBlock` custom Keras layer: MultiHeadAttention + FFN + LayerNorm + residuals
-- `HybridLSTMTransformer.build(input_shape)` -> compiled Keras model
-- Architecture: Input -> LSTM(50) -> Dropout -> LSTM(50) -> Dropout -> Dense(d_model) -> TransformerEncoder -> GlobalAvgPool -> Dense(25) -> Dropout -> sigmoid
-- `predict(X)` -> bullish probability (0-1). Input shape: (1, lookback_window, n_features)
-
-## models/trainer.py - ModelTrainer
-
-- `prepare_data(df)` -> (X_train, y_train, X_test, y_test). Sliding windows of lookback_window. Labels: 1 if next close > current close. MinMaxScaler normalization. Chronological split (no shuffle)
-- `train(model, X_train, y_train)` -> history dict. EarlyStopping(patience=10) + ReduceLROnPlateau
-- `evaluate(model, X_test, y_test)` -> {loss, accuracy, precision, recall}
-- `save_model(model, ticker, interval)` -> saves weights.h5 + scaler.pkl + metadata.json to models/saved/{ticker}_{interval}/
-- `load_model(ticker, interval)` -> (model, scaler, metadata) tuple. Rebuilds architecture from metadata
-
-## models/predictor.py - PricePredictor
-
-- `load(ticker, interval)` -> loads model+scaler+metadata from disk
-- `predict_next(df)` -> {direction: BUY/SELL, confidence: 0-1, probability: raw sigmoid}
-- `filter_signal(signal_direction, prediction)` -> {accepted: bool, reason: str}. Rejects if ML disagrees or confidence < threshold
 
 ## models/xgboost_model.py - XGBoostTrader (Primary ML)
 

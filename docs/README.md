@@ -16,6 +16,9 @@ docs/
 │   ├── AGENT_CONTEXT.md
 │   ├── GUIA_COMPLETA.md
 │   ├── INTEGRATION_SUMMARY.md
+│   ├── ML_RETRAINING.md
+│   ├── ML_RETRAINING_IMPLEMENTATION.md
+│   ├── ML_RETRAINING_SUMMARY.md
 │   ├── PROJECT_SPECS.md
 │   └── TRADING_SYSTEM_COMPLETE.md
 │
@@ -25,7 +28,6 @@ docs/
 │   ├── MULTIFREQ_TRADING_STRATEGY.md
 │   ├── GPU_SETUP.md
 │   ├── UNIFIED_PIPELINE_IMPLEMENTATION.md
-│   ├── ML_RETRAINING_IMPLEMENTATION.md   # LSTM legacy path, see note below
 │   ├── TIMESFM_GUIDE.md
 │   ├── TIMESFM_INTEGRATION_PLAN.md
 │   └── TIMESFM_TRAINING_STRATEGY.md
@@ -46,28 +48,23 @@ docs/
 │
 ├── reference/
 │   ├── ML_RESEARCH.md
-│   ├── ML_RETRAINING_SUMMARY.md      # LSTM legacy path, see note below
 │   ├── MODULES_API.md                # Full module API — source of truth for current code
 │   ├── TIMESFM_EXECUTIVE_SUMMARY.md
 │   └── TIMESFM_2P5_API_REFERENCE.md
 │
-├── research/
-│   ├── NORMALIZED_TIME_PROFILE.md
-│   └── TIMESFM_DEEP_RESEARCH.md
-│
-└── quickstart/
-    └── ML_RETRAINING.md              # LSTM legacy path, see note below
+└── research/
+    ├── NORMALIZED_TIME_PROFILE.md
+    └── TIMESFM_DEEP_RESEARCH.md
 ```
+(`quickstart/` is now empty — both its docs moved to `archive/` — and will disappear once git
+stops tracking any file under it.)
 
 > **`docs/archive/`** holds documents that describe an architecture the codebase no longer
 > has (the pre-Alpaca `run_script.py` era, or the 9-model LSTM+Transformer era before
-> XGBoost became primary). Each file has a banner at the top explaining what superseded it.
-> Don't use these as a reference for current behavior — they're kept only so history isn't lost.
->
-> **LSTM legacy path** — `ML_RETRAINING_IMPLEMENTATION.md`, `ML_RETRAINING_SUMMARY.md`, and
-> `ML_RETRAINING.md` document retraining `models/hybrid_model.py` (LSTM+Transformer), which is
-> reachable via `main.py train-lstm` but is **not** the primary ML path (that's XGBoost, see
-> `CLAUDE.md`). These three may move to `docs/archive/` if the LSTM path is ever fully retired.
+> XGBoost became primary — including the LSTM retraining guides, `ML_RETRAINING*.md`, moved
+> here once LSTM was fully retired). Each file has a banner at the top explaining what
+> superseded it. Don't use these as a reference for current behavior — they're kept only so
+> history isn't lost.
 
 ---
 

@@ -57,7 +57,7 @@ class BacktestEngine:
             df: DataFrame with OHLCV + indicator columns.
             ticker: Ticker symbol for labeling.
             interval: Data interval for labeling.
-            predictor: Optional PricePredictor instance for ML filtering.
+            predictor: Optional XGBoostPredictor instance for ML filtering.
             delay_sec: Delay between ML predictions to avoid rate limits (if applicable).
 
         Returns:

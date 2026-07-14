@@ -130,9 +130,9 @@ TP:   3% arriba entry
 
 ## 🤖 ML Filtering
 
-**Nota de arquitectura (actualizado):** el filtro ML primario hoy es **XGBoost cross-sectional**
-(`PRIMARY_ML_MODEL = 'xgboost'` en `config/settings.py`, entrenado sobre los 19 tickers juntos —
-ver `docs/reference/ML_RESEARCH.md`), no LSTM. **TimesFM** (`models/timesfm_predictor.py`) corre
+**Nota de arquitectura (actualizado):** el único filtro ML es **XGBoost cross-sectional**
+(entrenado sobre los 19 tickers juntos — ver `docs/reference/ML_RESEARCH.md`). LSTM se retiró
+por completo (ver `docs/archive/ML_RETRAINING*.md`). **TimesFM** (`models/timesfm_predictor.py`) corre
 después como validador adicional en 1m/1h, sumando una estrella de confluencia si coincide en
 dirección y ajustando el SL/TP en las estrategias de momentum. La mecánica de "compara técnico
 vs ML, rechaza si discrepan fuerte" descrita abajo sigue siendo correcta — solo cambió cuál
@@ -172,11 +172,9 @@ camino primario) y quedó desactualizada.
 ### Comando Básico
 
 ```bash
-# Genera 1 señal ahora
+# Genera 1 señal ahora (solo análisis técnico — comando de debug de un ticker,
+# sin filtro ML; para ML+TimesFM usar `pipeline`/`watch`/`scan`, ver abajo)
 python main.py signal --strategy macd_vwap --ticker SPY
-
-# Con filtro ML
-python main.py signal --strategy macd_vwap --ticker SPY --use-ml
 ```
 
 ### Output Ejemplo
@@ -194,8 +192,6 @@ python main.py signal --strategy macd_vwap --ticker SPY --use-ml
   Stop Loss:  $677.00 (-0.5%)
   Take Profit: $688.50 (+1.0%)
   Risk/Reward: 1:2.0
-
-  ML Filter: ✅ PASSED (confidence: 0.58)
 
 ==================================================
 ```

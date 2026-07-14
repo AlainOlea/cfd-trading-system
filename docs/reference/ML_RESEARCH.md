@@ -52,8 +52,7 @@ DOI: `10.1016/j.eswa.2023.121404`
 **Key finding**: Cross-sectional Deep RankNet significantly outperformed per-asset LSTM on 100 Toronto Stock Exchange stocks (2015-2021). Deep RankNet Sharpe: 1.59. Author explicitly noted LSTM requires "a lot of computational effort" because it "learns the behavior of each stock independently," while RankNet "ranks all stocks all at once (so learning is more global)."
 
 **Applied to this project**:
-- Cross-sectional XGBoost replaced per-ticker LSTM as the primary ML model
-- `PRIMARY_ML_MODEL = 'xgboost'` in config
+- Cross-sectional XGBoost replaced per-ticker LSTM as the ML model (LSTM later retired entirely)
 - Pipeline's `_apply_ml` tries cross-sectional model first, falls back to per-ticker
 
 ---
@@ -146,7 +145,7 @@ Class weights:    Inverse frequency (handles imbalance)
 Accuracy:         74.4% (1d) / 84.4% (1h) test
 ```
 
-### Fallback: LSTM+Transformer (Legacy)
+### Retired: LSTM+Transformer
 
 ```
 HybridLSTMTransformer:
@@ -159,7 +158,7 @@ Features:          9 (OHLCV + RSI + MACD + BB)
 Labels:            Next-bar binary direction
 Training:          Per-ticker, ~140-1,751 samples
 Accuracy:          ~50-55% test (not statistically significant)
-Status:            Deprecated. Kept as fallback via PRIMARY_ML_MODEL config.
+Status:            Retired entirely (2026-07-13) — see docs/archive/ML_RETRAINING*.md
 ```
 
 ---

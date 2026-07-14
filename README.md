@@ -65,7 +65,6 @@ python3 main.py paper-history                  # Historial de trades y P&L
 | `scan` | Escanear múltiples tickers y estrategias |
 | `watch` | Monitoreo continuo con horarios de mercado |
 | `backtest` | Backtesting con VectorBT |
-| `train-lstm` | Entrenar modelo LSTM+Transformer (legacy) |
 | `train-xgb-cross` | Entrenar XGBoost cross-sectional (todos los tickers juntos) |
 | `fetch-data` | Descargar datos OHLCV |
 | `fetch-all-history` | Descargar historial extendido (5 años diario, 2 años horario) |
@@ -98,7 +97,8 @@ Todas soportan filtro de tendencia (ADX ≥ 20) y SL/TP dinámico basado en ATR.
 | Labels | Binary threshold (≥0.5% move) | Binary threshold (≥0.5% move) |
 | Test accuracy | 74.4% | 84.4% |
 
-**LSTM+Transformer** (legacy): disponible como fallback vía `PRIMARY_ML_MODEL='lstm'` en config.
+> LSTM+Transformer fue retirado por completo (ver `docs/archive/ML_RETRAINING*.md`) — XGBoost
+> es el único modelo ML soportado hoy.
 
 ---
 

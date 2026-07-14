@@ -260,9 +260,6 @@ TRIPLE_BARRIER_CONFIG = {
     'binary_threshold': 0.005,       # 0.5% min move to be tradeable
 }
 
-# Model selection: which model type the pipeline uses by default
-PRIMARY_ML_MODEL = 'xgboost'  # 'xgboost' | 'lstm'
-
 # ============================================
 # DATA SOURCES
 # ============================================

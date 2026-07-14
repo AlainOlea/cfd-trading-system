@@ -82,7 +82,6 @@ class SignalGenerator:
         ticker: str,
         interval: str = '1d',
         days: int | None = None,
-        use_ml: bool = False,
     ) -> Signal:
         """Generate a signal for a given strategy and ticker.
 
@@ -94,7 +93,6 @@ class SignalGenerator:
             ticker: Ticker symbol.
             interval: Data interval.
             days: Days of history to fetch. Auto-calculated if None.
-            use_ml: Whether to filter with ML model.
 
         Returns:
             Signal object with the latest trading signal.
@@ -131,10 +129,6 @@ class SignalGenerator:
             take_profit=float(latest['take_profit']),
             confidence=float(latest['confidence']),
         )
-
-        # 5. ML filter (Phase 6)
-        if use_ml:
-            signal = self._apply_ml_filter(signal, df)
 
         logger.info(f"Signal generated: {signal.direction} {ticker} @ {signal.entry_price:.2f} (conf: {signal.confidence:.2f})")
         return signal
@@ -192,54 +186,6 @@ class SignalGenerator:
             confidence=float(last['confidence']),
             timestamp=last.name.to_pydatetime() if hasattr(last.name, 'to_pydatetime') else datetime.now(),
         )
-
-    def _apply_ml_filter(self, signal: Signal, df: pd.DataFrame) -> Signal:
-        """Apply ML model prediction as a filter on the signal.
-
-        Uses lower thresholds to combine technical signals with ML predictions:
-        - If technical signal is strong (BUY/SELL), keep it if ML doesn't strongly disagree
-        - If technical signal is HOLD but ML has high confidence (>55%), use ML signal
-        - If both signals agree, boost confidence
-
-        If ML model is not available, returns the signal unchanged with a warning.
-        """
-        try:
-            from models.predictor import PricePredictor
-            predictor = PricePredictor(confidence_threshold=0.55)  # Lower threshold for combining
-            predictor.load(signal.ticker, signal.interval)
-            prediction = predictor.predict_next(df)
-
-            signal.ml_filtered = True
-            signal.ml_confidence = prediction.get('confidence', 0)
-            ml_direction = prediction['direction']
-            ml_confidence = prediction['confidence']
-
-            # Combine signals with lower thresholds
-            if signal.direction == 'HOLD':
-                # Technical signal is HOLD: use ML signal if it has high confidence (>55%)
-                if ml_confidence > 0.55:
-                    logger.info(f"ML overrides HOLD with {ml_direction} ({ml_confidence:.1%} confidence)")
-                    signal.direction = ml_direction
-                    signal.confidence = ml_confidence
-            elif signal.direction == ml_direction:
-                # Both signals agree: boost confidence
-                combined_confidence = min(1.0, (signal.confidence + ml_confidence) / 2)
-                logger.info(f"ML confirms {signal.direction} - combined confidence: {combined_confidence:.2f}")
-                signal.confidence = combined_confidence
-            else:
-                # Signals disagree: only reject if ML has high opposing confidence (>65%)
-                if ml_confidence > 0.65:
-                    logger.info(f"ML strongly disagrees ({ml_direction} {ml_confidence:.1%}). Rejecting signal.")
-                    signal.direction = 'HOLD'
-                    signal.confidence = 0.0
-                else:
-                    # Keep technical signal if ML opposition is weak (<65%)
-                    logger.info(f"ML weakly disagrees ({ml_direction} {ml_confidence:.1%}). Keeping technical signal.")
-
-        except (ImportError, FileNotFoundError) as e:
-            logger.warning(f"ML model not available ({e}). Signal passed without ML filter.")
-
-        return signal
 
     @staticmethod
     def _estimate_days(interval: str) -> int:

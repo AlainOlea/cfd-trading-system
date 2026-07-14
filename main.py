@@ -8,7 +8,7 @@ Usage:
     python main.py fetch-data --ticker SPY --interval 1m --days 30
     python main.py backtest --strategy macd_vwap --ticker SPY --interval 1m
     python main.py signal --strategy macd_vwap --ticker SPY
-    python main.py train-lstm --ticker SPY --epochs 50
+    python main.py train-xgb-cross --interval 1d
     python main.py list-strategies
     python main.py list-tickers
 """
@@ -212,31 +212,21 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, 
         
         predictor = None
         if use_ml:
-            from config.settings import PRIMARY_ML_MODEL
-            if PRIMARY_ML_MODEL == 'xgboost':
-                from models.xgboost_model import XGBoostPredictor
-                predictor = XGBoostPredictor(confidence_threshold=0.55)
-                loaded = False
-                for model_name in ['all_tickers', ticker]:
-                    try:
-                        predictor.load(model_name, interval)
-                        loaded = True
-                        click.echo(f"   Loaded XGBoost model: {model_name}_{interval}")
-                        break
-                    except FileNotFoundError:
-                        continue
-                if not loaded:
-                    click.echo(f"   ⚠️ Could not load XGBoost model for {ticker}. Running without ML.")
-                    predictor = None
-            else:
-                from models.predictor import PricePredictor
-                predictor = PricePredictor()
+            from models.xgboost_model import XGBoostPredictor
+            predictor = XGBoostPredictor(confidence_threshold=0.55)
+            loaded = False
+            for model_name in ['all_tickers', ticker]:
                 try:
-                    predictor.load(ticker, interval)
-                except Exception as e:
-                    click.echo(f"   ⚠️ Could not load ML model: {e}. Running without ML.")
-                    predictor = None
-                
+                    predictor.load(model_name, interval)
+                    loaded = True
+                    click.echo(f"   Loaded XGBoost model: {model_name}_{interval}")
+                    break
+                except FileNotFoundError:
+                    continue
+            if not loaded:
+                click.echo(f"   ⚠️ Could not load XGBoost model for {ticker}. Running without ML.")
+                predictor = None
+
         engine = BacktestEngine(initial_capital=initial_capital)
 
         # 4. Run backtest
@@ -271,16 +261,13 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, 
 @click.option('--ticker', default='SPY', help='Ticker symbol')
 @click.option('--interval', default='1m', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
               help='Data interval')
-@click.option('--use-ml', is_flag=True, help='Use LSTM prediction filter')
-def signal(strategy, ticker, interval, use_ml):
+def signal(strategy, ticker, interval):
     """Generate trading signals for a ticker."""
     try:
         click.echo(f"\n📈 Generating signals...")
         click.echo(f"   Strategy: {strategy}")
         click.echo(f"   Ticker: {ticker}")
         click.echo(f"   Interval: {interval}")
-        if use_ml:
-            click.echo(f"   ML Filter: ✅ Enabled")
 
         from signals.generator import SignalGenerator
         from signals.manager import SignalManager
@@ -295,7 +282,6 @@ def signal(strategy, ticker, interval, use_ml):
             strategy_name=strategy,
             ticker=ticker,
             interval=interval,
-            use_ml=use_ml,
         )
 
         # Log and display
@@ -320,110 +306,6 @@ def signal(strategy, ticker, interval, use_ml):
         click.echo(f"\n❌ Error generating signals: {str(e)}", err=True)
         logger.error(f"Error generating signals: {e}", exc_info=True)
         sys.exit(1)
-
-# ============================================
-# COMMAND: TRAIN LSTM MODEL
-# ============================================
-
-@cli.command('train-lstm')
-@click.option('--ticker', default='SPY', help='Ticker symbol')
-@click.option('--interval', default='1d', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
-              help='Data interval')
-@click.option('--epochs', default=50, type=int, help='Number of training epochs')
-@click.option('--batch-size', default=32, type=int, help='Batch size')
-@click.option('--validation-split', default=0.15, type=float, help='Validation split ratio')
-def train_lstm(ticker, interval, epochs, batch_size, validation_split):
-    """Train LSTM model for price prediction."""
-    try:
-        click.echo(f"\n🤖 Training LSTM model...")
-        click.echo(f"   Ticker: {ticker}")
-        click.echo(f"   Interval: {interval}")
-        click.echo(f"   Epochs: {epochs}")
-        click.echo(f"   Batch Size: {batch_size}")
-        click.echo(f"   Validation Split: {validation_split*100:.0f}%")
-
-        from data.fetcher import DataFetcher
-        from data.processor import DataProcessor
-        from indicators.technical import TechnicalIndicators
-        from models.hybrid_model import HybridLSTMTransformer
-        from models.trainer import ModelTrainer
-
-        # 1. Fetch data
-        fetcher = DataFetcher()
-        processor = DataProcessor()
-
-        try:
-            df = fetcher.load_from_csv(ticker, interval)
-            click.echo(f"   Loaded cached data: {len(df)} rows")
-        except FileNotFoundError:
-            click.echo(f"   Fetching data...")
-            df = fetcher.fetch_yfinance(ticker, interval, days=365)
-            fetcher.save_to_csv(df, ticker, interval)
-            click.echo(f"   Fetched {len(df)} rows")
-
-        df = processor.clean_data(df)
-
-        # 2. Add indicators (features for ML)
-        click.echo(f"   Computing indicators...")
-        df = TechnicalIndicators.add_all_indicators(df)
-
-        # 3. Prepare data
-        trainer = ModelTrainer(
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_split=validation_split,
-        )
-        X_train, y_train, X_test, y_test = trainer.prepare_data(df)
-        click.echo(f"   Train samples: {len(X_train)}, Test samples: {len(X_test)}")
-
-        # 4. Build model
-        hybrid = HybridLSTMTransformer()
-        input_shape = (X_train.shape[1], X_train.shape[2])
-        hybrid.build(input_shape)
-        click.echo(f"   Model params: {hybrid.model.count_params():,}")
-
-        # 5. Train
-        click.echo(f"\n   Training...")
-        trainer.train(hybrid, X_train, y_train, epochs=epochs, batch_size=batch_size)
-
-        # 6. Evaluate (classification metrics)
-        metrics = trainer.evaluate(hybrid, X_test, y_test)
-        click.echo(f"\n   Test Results:")
-        click.echo(f"   Accuracy:  {metrics['accuracy']:.4f}")
-        click.echo(f"   Precision: {metrics['precision']:.4f}")
-        click.echo(f"   Recall:    {metrics['recall']:.4f}")
-        click.echo(f"   Loss:      {metrics['loss']:.4f}")
-
-        # 6b. OOS financial backtest — the only honest measure of edge
-        try:
-            oos = trainer.backtest_predictions(hybrid, X_test, ticker=ticker, interval=interval)
-            metrics.update(oos)
-            click.echo(f"\n   OOS Financial Backtest (with CFD costs):")
-            click.echo(f"   Sharpe:        {oos['oos_sharpe']:>8.2f}")
-            click.echo(f"   Total Return:  {oos['oos_total_return_pct']:>8.2f}%")
-            click.echo(f"   Max Drawdown:  {oos['oos_max_drawdown_pct']:>8.2f}%")
-            click.echo(f"   Profit Factor: {oos['oos_profit_factor']:>8.2f}")
-            click.echo(f"   Win Rate:      {oos['oos_win_rate_pct']:>8.2f}%")
-            click.echo(f"   Trades:        {oos['oos_n_trades']:>8d}")
-        except Exception as e:
-            click.echo(f"\n   ⚠️  OOS backtest skipped: {e}")
-            logger.warning(f"OOS backtest failed for {ticker}: {e}")
-
-        # 7. Save model (promotion gate applied inside save_model)
-        model_dir = trainer.save_model(hybrid, ticker, interval, metrics=metrics)
-        promoted, reasons = trainer.evaluate_promotion(metrics)
-        if promoted:
-            click.echo(f"\n   ✅ Model PROMOTED (passes OOS gate)")
-        else:
-            click.echo(f"\n   ⚠️  Model NOT promoted: {reasons}")
-        click.echo(f"\n   Model saved to: {model_dir}")
-        logger.info(f"LSTM training completed for {ticker}: acc={metrics['accuracy']:.4f}")
-
-    except Exception as e:
-        click.echo(f"\n❌ Error training model: {str(e)}", err=True)
-        logger.error(f"Error training model: {e}", exc_info=True)
-        sys.exit(1)
-
 
 @cli.command('train-xgb-cross')
 @click.option('--interval', default='1d', type=click.Choice(['1d', '1h', '1m']),

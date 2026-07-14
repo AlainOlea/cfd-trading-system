@@ -1,3 +1,8 @@
+> **ARCHIVADO (2026-07-13)** — describe el pipeline de reentrenamiento de `HybridLSTMTransformer`
+> (`models/hybrid_model.py`, `models/trainer.py`). LSTM se retiró por completo (Fase 4 de la
+> limpieza arquitectónica) — XGBoost es hoy el único modelo ML soportado. Para reentrenar,
+> ver `main.py train-xgb-cross`. Solo referencia histórica.
+
 # Quick Start: ML Model Retraining Pipeline
 
 ## TL;DR - Run These Commands

@@ -418,7 +418,7 @@ python3 main.py pipeline --category commodities --category indices
 # Prefer UnifiedPipeline for anything beyond a quick manual check.
 from signals.generator import SignalGenerator
 gen = SignalGenerator()
-signal = gen.generate('macd_vwap', 'GLD', '1d', use_ml=True)
+signal = gen.generate('macd_vwap', 'GLD', '1d')  # technical-only, no ML filter
 ```
 
 ```python
@@ -626,7 +626,8 @@ python3 -c "from signals.telegram_bot import TelegramNotifier; TelegramNotifier(
 - [../reference/MODULES_API.md](../reference/MODULES_API.md) - Full module API, kept in sync with the code
 - [FRESH_DATA_FIX.md](../analysis/FRESH_DATA_FIX.md) - Detailed data fix explanation
 - [SIGNAL_GENERATION_GUIDE.md](SIGNAL_GENERATION_GUIDE.md) - Strategy details
-- [ML_RETRAINING_IMPLEMENTATION.md](ML_RETRAINING_IMPLEMENTATION.md) - Model training (LSTM legacy path, see note in `docs/README.md`)
+- `main.py train-xgb-cross` - Trains the current (only) ML model; see `docs/reference/ML_RESEARCH.md`
+- [../archive/ML_RETRAINING_IMPLEMENTATION.md](../archive/ML_RETRAINING_IMPLEMENTATION.md) - Retired LSTM retraining pipeline (historical reference only)
 
 ---
 
