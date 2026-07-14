@@ -50,7 +50,7 @@ models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/timesfm_predictor.py # TimesFMPredictor: zero-shot 1min forecast, validates XGBoost signal
 models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting (standalone, not wired into UnifiedPipeline)
 scripts/                    # Utility scripts (training, comparison, backfill)
-tests/                      # 132 tests (all passing)
+tests/                      # 147 tests (all passing)
 ```
 
 ## Key Features
@@ -70,16 +70,24 @@ Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
 | `CFD Paper Daily` | Mon-Fri, 07:00 ET, 1d | GTC (SL 1.5%, TP 3%) |
 
 ### Strategies
-| Strategy | Type | Signal | SL | TP |
-|----------|------|--------|----|----|
-| MACD + VWAP | Scalping | MACD cross + VWAP filter | 0.5% | 1% |
-| RSI + BB | Scalping | RSI oversold/overbought + BB touch | 0.7% | bb_middle |
-| MA Crossover | Swing | SMA50/200 golden/death cross | 2% | 3% |
+| Strategy | Type | Signal | SL | TP | Regime filter |
+|----------|------|--------|----|----|----|
+| MACD + VWAP | Scalping (momentum) | MACD cross + VWAP filter | 0.5% | 1% | `require_trend` (needs ADX >= 20) |
+| RSI + BB | Scalping (mean reversion) | RSI oversold/overbought + BB touch | 0.7% | bb_middle | `require_ranging` (needs ADX < 20) |
+| MA Crossover | Swing | SMA50/200 golden/death cross | 2% | 3% | none |
+
+`mean_reversion=True` on `RSIBBStrategy` also tells `UnifiedPipeline._apply_timesfm()` to
+leave its SL/TP alone — TimesFM's momentum-continuation forecast has no relation to a
+reversion-to-bb_middle target and was previously overwriting it for every 1m/1h signal.
 
 ### Risk Management
-- Max 2% risk per trade, 5% max position size
-- Max 10 concurrent positions (default)
-- Min confluence: 3 stars, ML confidence: 65%
+- `MAX_POSITION_PCT=5%` per position is the size that actually binds for scalping strategies
+  (tight 0.5-0.7% stops make the 2%-risk sizing formula moot — it always computes to more
+  shares than the 5% capital cap allows). `RISK_PER_TRADE=2%` is nominal, not the real risk.
+- `MAX_GROSS_EXPOSURE=50%` total (aligned with `MAX_CONCURRENT_POSITIONS=10` — 10 x 5% = 50%;
+  it was 30%, which capped concurrency at 6 regardless of the 10-position setting)
+- `MAX_CONCURRENT_POSITIONS=10`, `CRYPTO_MAX_AGGREGATE=10%`, `CRYPTO_MAX_SINGLE=3%`
+- Min confluence: 3 stars (default), min confidence: 60% (`paper-trade` default)
 
 ## Tickers (19)
 **Stocks/ETFs**: SPY, QQQ, IWM, DIA, GLD, SLV, USO, UNG, AAPL, NVDA, MSFT, AMZN, GOOGL, META, TSLA
@@ -107,7 +115,7 @@ Windows Task Scheduler ejecuta `.bat` que invocan `wsl.exe`:
 - Usar parametros de `config/settings.py` para todo
 - Implementar graceful degradation
 - Validar DataFrames antes de procesar (columnas OHLCV completas)
-- Risk management: max 2% per trade, max 10 concurrent positions (default)
+- Risk management: max 5% per position (the binding cap), max 50% gross exposure, max 10 concurrent positions
 
 ### Don't
 - NO hardcodear tickers, intervalos o parametros

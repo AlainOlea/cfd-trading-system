@@ -98,7 +98,7 @@ class TestPortfolioRiskChecks:
 
     def test_gross_exposure_exceeded(self):
         positions = {
-            'SPY': {'market_value': 15000},
+            'SPY': {'market_value': 35000},
             'QQQ': {'market_value': 10000},
         }
         broker = self._make_broker_with_positions(positions)

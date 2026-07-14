@@ -8,7 +8,9 @@ Detailed API documentation for all modules.
 
 - `fetch_yfinance(ticker, interval, days)` -> DataFrame OHLCV. Tested: SPY 1d, BTC-USD 1h
 - `fetch_ccxt(symbol, timeframe, limit)` -> DataFrame OHLCV via CCXT. Lazy-loads exchange connection
-- `save_to_csv(df, ticker, interval)` -> guarda en `data/raw/{TICKER}_{interval}.csv`
+- `save_to_csv(df, ticker, interval)` -> guarda en `data/raw/{TICKER}_{interval}.csv`. Escritura atomica
+  (tmp file + os.replace, via `_atomic_write_csv()`) — un write interrumpido a mitad de camino deja el
+  archivo anterior intacto en vez de corromper el CSV
 - `load_from_csv(ticker, interval)` -> carga desde `data/raw/`
 - `_normalize_columns(df)` -> flatten MultiIndex de yfinance, lowercase, valida OHLCV
 - `fetch_incremental(ticker, interval)` -> incremental fetch via Alpaca Data API, fallback yfinance
@@ -67,8 +69,15 @@ Detailed API documentation for all modules.
 ## strategies/ - Trading Strategies
 
 - `strategies/base.py` - BaseStrategy ABC: generate_signals(), calculate_position_size(), _init_signal_columns()
-- `strategies/scalping/macd_vwap.py` - MACDVWAPStrategy: MACD cross + VWAP filter. SL 0.5%, TP 1%
-- `strategies/scalping/rsi_bb.py` - RSIBBStrategy: RSI oversold/overbought + BB touch. SL 0.7%, TP=bb_middle
+  - Class flags subclasses can set: `require_trend` (only signal when ADX confirms a trend, e.g.
+    macd_vwap), `require_ranging` (only signal when ADX does NOT confirm a trend — mean reversion
+    needs room to revert, e.g. rsi_bb), `use_atr_sl` (ATR-based SL/TP instead of fixed %),
+    `mean_reversion` (tells `UnifiedPipeline._apply_timesfm()` to leave this strategy's own SL/TP
+    alone instead of overwriting it with TimesFM's momentum-continuation forecast)
+- `strategies/scalping/macd_vwap.py` - MACDVWAPStrategy: MACD cross + VWAP filter. SL 0.5%, TP 1%.
+  `require_trend=True`
+- `strategies/scalping/rsi_bb.py` - RSIBBStrategy: RSI oversold/overbought + BB touch. SL 0.7%,
+  TP=bb_middle. `require_ranging=True`, `mean_reversion=True`
 - `strategies/swing/ma_crossover.py` - MACrossoverStrategy: SMA50/200 golden/death cross. SL 2%, TP 3%
 - `strategies/__init__.py` - STRATEGY_MAP = {'macd_vwap': ..., 'rsi_bb': ..., 'ma_crossover': ...}
 - Signal columns added: signal (BUY/SELL/HOLD), entry_price, stop_loss, take_profit, confidence (0-1)
@@ -96,14 +105,22 @@ Detailed API documentation for all modules.
 
 ## signals/pipeline.py - Unified Signal Pipeline
 
-- `UnifiedPipeline` class: Consolidates all signal flows (technical + ML + ensemble + news)
+- `UnifiedPipeline` class: Consolidates all signal flows (technical + ML + TimesFM + news)
 - `TickerConfig` dataclass: Per-ticker configuration (strategies, intervals, layers)
 - `PipelineResult` dataclass: Complete output with all analysis layers
 - `run_all(category, ticker_filter)` -> List[PipelineResult]. Parallel processing with ThreadPoolExecutor
 - `run_ticker(config)` -> List[PipelineResult]. One per interval, shared data cache
 - `_fetch_data(ticker, interval)` -> **Alpaca Data API incremental** (fallback Yahoo Finance)
-- `_apply_ml()`, `_apply_ensemble()`, `_apply_news()` -> Graceful degradation layers
-- `_compute_confluence()` -> Multi-timeframe confluence scoring (0-5 stars)
+- `_apply_ml()`, `_apply_news()` -> Graceful degradation layers. `_apply_ml()` uses XGBoost
+  (cross-sectional `all_tickers` model first, per-ticker fallback) per `PRIMARY_ML_MODEL`
+- `_run_timesfm_batch()` / `_apply_timesfm()` -> TimesFM zero-shot validation, post-processing over
+  1m/1h results only. Adds a confluence bonus on direction agreement and overwrites SL/TP with
+  quantile-based levels — **except** for strategies with `mean_reversion=True` (e.g. rsi_bb), whose
+  own SL/TP is left untouched since TimesFM's forecast has no relation to a reversion target
+- `_compute_final_signal()` -> combines technical + ML (XGBoost) votes; ML can veto with a strong
+  disagreement (>65% confidence). No longer includes an LSTM ensemble vote (see
+  `models/ensemble_predictor.py` below — disconnected from the pipeline)
+- `_compute_confluence()` -> Multi-timeframe confluence scoring (0-4 stars; TimesFM can add a 5th)
 - Features: Fresh data, no duplicates, parallel processing, configurable per-ticker
 
 ## signals/generator.py - SignalGenerator
@@ -135,6 +152,9 @@ Detailed API documentation for all modules.
 - `place_signal(signal, interval)` -> executes bracket orders on Alpaca paper sandbox
 - `get_open_positions()` -> dict of current positions with P&L
 - `has_position(symbol)` -> checks if holding a position
+- `_normalize_symbol(symbol)` -> strips `/` and `-` for cross-format comparison. Alpaca returns
+  crypto symbols inconsistently across endpoints (`SOL/USD` on orders, `SOLUSD` on positions; our
+  internal ticker is `SOL-USD`) — every symbol comparison in this module goes through this first
 - `calculate_shares(entry, stop_loss)` -> position sizing (2% risk, 5% max per position)
 - `get_trade_history(days)` -> closed trades with P&L calculation
 - `get_performance(days)` -> win rate, profit factor, avg win/loss
@@ -175,6 +195,9 @@ Detailed API documentation for all modules.
 
 ## models/ensemble_predictor.py - EnsemblePredictor
 
+- **Standalone — not wired into `UnifiedPipeline`.** The pipeline's ML layer (`_apply_ml()`) uses
+  XGBoost alone, validated by TimesFM (see `signals/pipeline.py` above); this class still works if
+  called directly, but no longer participates in live signal generation
 - Combines LSTM + XGBoost predictions via voting mechanism
 - `load(ticker, interval, models=['lstm', 'xgb'])` -> loads both models
 - `predict_next(df)` -> {lstm: prediction, xgb: prediction, ensemble: consensus}

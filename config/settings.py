@@ -83,7 +83,9 @@ RISK_PER_TRADE = 0.02          # 2% risk per trade (dynamic: recomputed from liv
 
 # Portfolio risk limits (enforced by AlpacaBroker.place_signal)
 MAX_POSITION_PCT = 0.05        # 5% max per single position (of equity)
-MAX_GROSS_EXPOSURE = 0.30      # 30% max total open exposure (sum of all positions)
+MAX_GROSS_EXPOSURE = 0.50      # 50% max total open exposure — aligned with MAX_CONCURRENT_POSITIONS
+                                # (10 positions x MAX_POSITION_PCT 5% = 50%; at 30% only 6 fit, making
+                                # the 10-position cap unreachable)
 MAX_NAME_EXPOSURE = 0.10       # 10% max per single name
 MAX_CONCURRENT_POSITIONS = 10  # Hard cap on open positions
 DRAWDOWN_WARNING_PCT = 0.05    # 5% drawdown from session high → warn in logs
