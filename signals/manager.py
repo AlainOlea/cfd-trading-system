@@ -32,11 +32,42 @@ class SignalManager:
         self._ensure_csv_exists()
 
     def _ensure_csv_exists(self) -> None:
-        """Create CSV with headers if it doesn't exist or is empty."""
+        """Create CSV with headers if it doesn't exist or is empty.
+        Migrates old-format CSVs (missing columns) to current format.
+        """
         if not self.log_file.exists() or self.log_file.stat().st_size == 0:
             with open(self.log_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(_CSV_HEADERS)
+            return
+
+        # Check if CSV header matches current format; migrate if stale
+        with open(self.log_file, 'r', newline='') as f:
+            reader = csv.reader(f)
+            try:
+                existing_header = next(reader)
+            except StopIteration:
+                existing_header = []
+
+        if existing_header == _CSV_HEADERS:
+            return  # already up-to-date
+
+        missing = [c for c in _CSV_HEADERS if c not in existing_header]
+        logger.info(f"Migrating {self.log_file.name}: adding {len(missing)} missing columns {missing}")
+
+        rows: list[dict[str, str]] = []
+        with open(self.log_file, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                new_row = {h: row.get(h, '') for h in _CSV_HEADERS}
+                rows.append(new_row)
+
+        with open(self.log_file, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=_CSV_HEADERS)
+            writer.writeheader()
+            writer.writerows(rows)
+
+        logger.info(f"Migrated {self.log_file.name}: {len(rows)} rows, {len(_CSV_HEADERS)} columns")
 
     def _is_duplicate(self, signal: Signal, window_hours: int = 4) -> bool:
         """Check if same ticker+direction+entry_price was logged recently.
