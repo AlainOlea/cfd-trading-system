@@ -35,7 +35,6 @@ class Signal:
     timestamp: datetime = field(default_factory=datetime.now)
     ml_filtered: bool = False
     ml_confidence: float | None = None
-    ensemble_consensus: str | None = None        # STRONG, WEAK, None
     news_sentiment: dict | None = None           # {sentiment, confidence, headline}
     confluence_score: int = 0                    # 0-5 stars
 
@@ -65,7 +64,6 @@ class Signal:
             'risk_reward': self.risk_reward_ratio or '',
             'ml_filtered': self.ml_filtered,
             'ml_confidence': self.ml_confidence if self.ml_confidence is not None else '',
-            'ensemble_consensus': self.ensemble_consensus or '',
             'news_sentiment': self.news_sentiment.get('sentiment', {}).get('sentiment', '') if self.news_sentiment else '',
             'confluence_score': self.confluence_score,
         }

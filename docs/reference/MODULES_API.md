@@ -118,14 +118,13 @@ Detailed API documentation for all modules.
   quantile-based levels — **except** for strategies with `mean_reversion=True` (e.g. rsi_bb), whose
   own SL/TP is left untouched since TimesFM's forecast has no relation to a reversion target
 - `_compute_final_signal()` -> combines technical + ML (XGBoost) votes; ML can veto with a strong
-  disagreement (>65% confidence). No longer includes an LSTM ensemble vote (see
-  `models/ensemble_predictor.py` below — disconnected from the pipeline)
+  disagreement (>65% confidence)
 - `_compute_confluence()` -> Multi-timeframe confluence scoring (0-4 stars; TimesFM can add a 5th)
 - Features: Fresh data, no duplicates, parallel processing, configurable per-ticker
 
 ## signals/generator.py - SignalGenerator
 
-- `Signal` dataclass: direction, entry_price, stop_loss, take_profit, confidence, risk_reward_ratio, ensemble_consensus, news_sentiment, confluence_score
+- `Signal` dataclass: direction, entry_price, stop_loss, take_profit, confidence, risk_reward_ratio, news_sentiment, confluence_score
 - `SignalGenerator.generate(strategy_name, ticker, interval, days, use_ml)` -> Signal. Full pipeline: fetch -> clean -> indicators -> strategy -> latest signal
 - `SignalGenerator.get_latest_actionable(strategy_name, ticker, interval, lookback)` -> Signal|None. Searches last N bars for BUY/SELL
 - `_apply_ml_filter(signal, df)` -> graceful degradation if ML model not available
@@ -193,14 +192,3 @@ Detailed API documentation for all modules.
 - `XGBoostPredictor` wrapper: `load()`, `predict_next(df)`, `filter_signal(direction, prediction)`
 - Cross-sectional model saved as `all_tickers_{interval}_xgb/`
 
-## models/ensemble_predictor.py - EnsemblePredictor
-
-- **Standalone — not wired into `UnifiedPipeline`.** The pipeline's ML layer (`_apply_ml()`) uses
-  XGBoost alone, validated by TimesFM (see `signals/pipeline.py` above); this class still works if
-  called directly, but no longer participates in live signal generation
-- Combines LSTM + XGBoost predictions via voting mechanism
-- `load(ticker, interval, models=['lstm', 'xgb'])` -> loads both models
-- `predict_next(df)` -> {lstm: prediction, xgb: prediction, ensemble: consensus}
-- `_ensemble_vote(lstm_pred, xgb_pred)` -> STRONG (both agree) or WEAK (disagree)
-- `filter_signal(signal_direction, df)` -> accepts only when ensemble agrees strongly
-- Graceful degradation: works with single model if one fails to load

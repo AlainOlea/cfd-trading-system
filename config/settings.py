@@ -432,32 +432,32 @@ WATCH_STRATEGIES = ['macd_vwap', 'rsi_bb']  # Default strategies for watch mode
 # ============================================
 
 # Unified pipeline ticker configurations
-# Each tuple: (ticker, category, intervals, strategies, use_ml, use_ensemble, use_news, confluence_min)
+# Each tuple: (ticker, category, intervals, strategies, use_ml, use_news, confluence_min)
 # Loaded lazily by signals.pipeline to avoid circular imports
 PIPELINE_TICKERS_RAW = [
     # Indices
-    ('SPY', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('QQQ', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('IWM', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
-    ('DIA', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('SPY', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('QQQ', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('IWM', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
+    ('DIA', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
     # Commodities
-    ('GLD', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('SLV', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('UNG', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('GLD', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('SLV', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('UNG', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     # Stocks
-    ('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('NVDA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('MSFT', 'stocks', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
-    ('AMZN', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('GOOGL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('META', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
-    ('TSLA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, True, 2),
+    ('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('NVDA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('MSFT', 'stocks', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
+    ('AMZN', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('GOOGL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('META', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    ('TSLA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     # Crypto
-    ('BTC-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
-    ('ETH-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
-    ('SOL-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, False, 2),
-    ('XRP-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, True, 2),
+    ('BTC-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
+    ('ETH-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
+    ('SOL-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, False, 2),
+    ('XRP-USD', 'crypto', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
 ]
 
 print("✅ Configuration loaded successfully")

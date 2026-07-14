@@ -52,8 +52,8 @@ def _build_pipeline_tickers() -> list['TickerConfig']:
     return [
         TickerConfig(
             ticker=t[0], category=t[1], intervals=t[2], strategies=t[3],
-            use_ml=t[4], use_ensemble=t[5], use_news=t[6],
-            confluence_min_stars=t[7],
+            use_ml=t[4], use_news=t[5],
+            confluence_min_stars=t[6],
         )
         for t in PIPELINE_TICKERS_RAW
     ]
@@ -67,7 +67,6 @@ class TickerConfig:
     intervals: list[str]            # ['1d', '1h', '15m']
     strategies: list[str]           # ['macd_vwap', 'rsi_bb']
     use_ml: bool = True
-    use_ensemble: bool = True
     use_news: bool = True
     confluence_min_stars: int = 2   # minimum to consider actionable
 
@@ -79,7 +78,6 @@ class PipelineResult:
     interval: str
     technical_signal: Signal
     ml_prediction: dict | None = None
-    ensemble_result: dict | None = None
     news_sentiment: dict | None = None
     confluence_score: int = 0           # 0-5 stars
     confluence_min_stars: int = 2       # minimum to be actionable
@@ -104,8 +102,6 @@ class PipelineResult:
             'technical_confidence': self.technical_signal.confidence,
             'ml_direction': self.ml_prediction.get('direction') if self.ml_prediction else '',
             'ml_confidence': self.ml_prediction.get('confidence') if self.ml_prediction else '',
-            'ensemble_consensus': self.ensemble_result.get('consensus') if self.ensemble_result else '',
-            'ensemble_confidence': self.ensemble_result.get('confidence') if self.ensemble_result else '',
             'news_sentiment': self.news_sentiment.get('sentiment', {}).get('sentiment') if self.news_sentiment else '',
             'news_alignment': self.news_sentiment.get('sentiment', {}).get('alignment') if self.news_sentiment else '',
             'confluence_score': self.confluence_score,
@@ -124,13 +120,11 @@ class UnifiedPipeline:
     def __init__(
         self,
         use_ml: bool = True,
-        use_ensemble: bool = True,
         use_news: bool = True,
         send_telegram: bool = True,
         max_workers: int = 4,
     ):
         self.use_ml = use_ml
-        self.use_ensemble = use_ensemble
         self.use_news = use_news
         self.send_telegram = send_telegram
         self._dedup_file = Path('logs/.telegram_dedup')
@@ -214,7 +208,7 @@ class UnifiedPipeline:
                     ticker=c.ticker, category=c.category,
                     intervals=[interval_filter],
                     strategies=c.strategies, use_ml=c.use_ml,
-                    use_ensemble=c.use_ensemble, use_news=c.use_news,
+                    use_news=c.use_news,
                     confluence_min_stars=c.confluence_min_stars,
                 )
                 for c in configs if interval_filter in c.intervals
@@ -350,8 +344,7 @@ class UnifiedPipeline:
             result.news_sentiment = self._apply_news(config.ticker, result)
 
         # 6. Update Signal dataclass with pipeline enrichments
-        # (ensemble_consensus stays None here — TimesFM validates instead,
-        # applied as post-processing in run_all() via _apply_timesfm())
+        # (TimesFM validates as post-processing in run_all() via _apply_timesfm())
         best_signal.news_sentiment = result.news_sentiment
         best_signal.confluence_score = result.confluence_score
 
@@ -710,11 +703,6 @@ class UnifiedPipeline:
             layers.append(f"  ML:         {result.ml_prediction['direction']:4s} "
                          f"(conf={result.ml_prediction['confidence']:.1%})")
 
-        if result.ensemble_result:
-            layers.append(f"  Ensemble:   {result.ensemble_result.get('direction', 'N/A'):4s} "
-                         f"(consensus={result.ensemble_result.get('consensus', 'N/A')}, "
-                         f"conf={result.ensemble_result.get('confidence', 0):.1%})")
-
         if result.news_sentiment and result.news_sentiment.get('sentiment'):
             sentiment = result.news_sentiment['sentiment']
             layers.append(f"  News:       {sentiment.get('sentiment', 'N/A'):10s} "
@@ -798,13 +786,6 @@ class UnifiedPipeline:
                 f"ML:     {result.ml_prediction['direction']} "
                 f"({result.ml_prediction['confidence']:.0%})"
             )
-        if result.ensemble_result:
-            ens = result.ensemble_result
-            lines.append(
-                f"Ensemble: {ens.get('direction', 'N/A')} "
-                f"({ens.get('consensus', 'N/A')})"
-            )
-
         # TimesFM forecast (60-step min/max range)
         tfm = self._tfm_results.get(result.ticker) if hasattr(self, '_tfm_results') else None
         if tfm and tfm.get('forecast') is not None:

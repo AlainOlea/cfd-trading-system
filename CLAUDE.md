@@ -48,7 +48,6 @@ signals/telegram_bot.py     # TelegramNotifier: senales via Telegram
 signals/alpaca_broker.py    # AlpacaBroker: paper trading bracket orders
 models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/timesfm_predictor.py # TimesFMPredictor: zero-shot 1min forecast, validates XGBoost signal
-models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting (standalone, not wired into UnifiedPipeline)
 scripts/                    # Utility scripts (training, comparison, backfill)
 tests/                      # 147 tests (all passing)
 ```

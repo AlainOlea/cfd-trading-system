@@ -689,7 +689,6 @@ def scan(strategies, tickers, interval, use_ml):
                 intervals=[interval],
                 strategies=strategy_list,
                 use_ml=use_ml,
-                use_ensemble=use_ml,  # ensemble only if ML is on
                 use_news=False,       # scan is meant to be fast
             )
             for t in ticker_list
@@ -697,7 +696,6 @@ def scan(strategies, tickers, interval, use_ml):
 
         pipe = UnifiedPipeline(
             use_ml=use_ml,
-            use_ensemble=use_ml,
             use_news=False,
             send_telegram=True,
         )
@@ -768,7 +766,6 @@ def watch(strategies, tickers, interval, every, use_ml):
             intervals=[interval],
             strategies=strategy_list,
             use_ml=use_ml,
-            use_ensemble=use_ml,
             use_news=False,
         )
         for t in ticker_list
@@ -776,7 +773,6 @@ def watch(strategies, tickers, interval, every, use_ml):
 
     pipe = UnifiedPipeline(
         use_ml=use_ml,
-        use_ensemble=use_ml,
         use_news=False,
         send_telegram=True,
     )
@@ -843,13 +839,12 @@ def watch(strategies, tickers, interval, every, use_ml):
               help='Filter by asset category')
 @click.option('--ticker', default=None, help='Run for a specific ticker only')
 @click.option('--no-ml', is_flag=True, help='Skip ML predictions')
-@click.option('--no-ensemble', is_flag=True, help='Skip ensemble voting')
 @click.option('--no-news', is_flag=True, help='Skip news sentiment analysis')
 @click.option('--telegram/--no-telegram', default=True, help='Send Telegram notifications')
-def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
+def pipeline(category, ticker, no_ml, no_news, telegram):
     """Run unified signal pipeline across all configured tickers.
 
-    Consolidates technical analysis, ML prediction, ensemble voting,
+    Consolidates technical analysis, ML prediction, TimesFM validation,
     and news sentiment into a single flow.
     """
     try:
@@ -863,14 +858,12 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
         if ticker:
             click.echo(f"  Ticker:    {ticker}")
         click.echo(f"  ML:        {'OFF' if no_ml else 'ON'}")
-        click.echo(f"  Ensemble:  {'OFF' if no_ensemble else 'ON'}")
         click.echo(f"  News:      {'OFF' if no_news else 'ON'}")
         click.echo(f"  Telegram:  {'ON' if telegram else 'OFF'}")
         click.echo(f"{'='*65}\n")
 
         pipe = UnifiedPipeline(
             use_ml=not no_ml,
-            use_ensemble=not no_ensemble,
             use_news=not no_news,
             send_telegram=telegram,
         )
@@ -921,14 +914,13 @@ def pipeline(category, ticker, no_ml, no_ensemble, no_news, telegram):
               type=click.Choice(['1d', '1h', '1m', 'all']),
               help='Timeframe to trade: 1d (swing), 1h (intraday), 1m (scalping), all (default)')
 @click.option('--no-ml', is_flag=True, help='Disable ML predictions')
-@click.option('--no-ensemble', is_flag=True, help='Disable ensemble voting')
 @click.option('--no-news', is_flag=True, help='Disable news sentiment')
 @click.option('--no-telegram', is_flag=True, help='Disable Telegram notifications')
 @click.option('--min-confluence', default=3, type=int, help='Min confluence stars to trade (1-5)')
 @click.option('--min-confidence', default=60.0, type=float, help='Min confidence % to trade')
 @click.option('--close-all', is_flag=True, help='Close all open paper positions first')
 @click.option('--dry-run', is_flag=True, help='Show what would be traded without executing')
-def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_telegram,
+def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
                 min_confluence, min_confidence, close_all, dry_run):
     """Run pipeline and auto-execute signals in Alpaca paper trading sandbox.
 
@@ -948,7 +940,6 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
     import time
 
     use_ml = not no_ml
-    use_ensemble = not no_ensemble
     use_news = not no_news
     send_telegram = not no_telegram
     manager = SignalManager()
@@ -992,7 +983,7 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
 
     # Run pipeline
     pipeline = UnifiedPipeline(
-        use_ml=use_ml, use_ensemble=use_ensemble,
+        use_ml=use_ml,
         use_news=use_news, send_telegram=send_telegram
     )
     results = pipeline.run_all(
