@@ -47,7 +47,8 @@ signals/manager.py          # SignalManager: log CSV, historial
 signals/telegram_bot.py     # TelegramNotifier: senales via Telegram
 signals/alpaca_broker.py    # AlpacaBroker: paper trading bracket orders
 models/xgboost_model.py     # XGBoostTrader: primary ML model
-models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting
+models/timesfm_predictor.py # TimesFMPredictor: zero-shot 1min forecast, validates XGBoost signal
+models/ensemble_predictor.py # EnsemblePredictor: LSTM + XGBoost voting (standalone, not wired into UnifiedPipeline)
 scripts/                    # Utility scripts (training, comparison, backfill)
 tests/                      # 132 tests (all passing)
 ```
@@ -55,9 +56,9 @@ tests/                      # 132 tests (all passing)
 ## Key Features
 
 ### Unified Signal Pipeline
-`python3 main.py pipeline` ejecuta todo: fetch fresh data -> indicators -> strategies -> ML filter -> ensemble -> confluence scoring -> Telegram.
+`python3 main.py pipeline` ejecuta todo: fetch fresh data -> indicators -> strategies -> ML filter -> TimesFM validation -> confluence scoring -> Telegram.
 - Fresh data: Alpaca Data API (incremental, solo velas nuevas) con fallback a Yahoo Finance
-- ML: XGBoost cross-sectional (19 tickers, 5y data) + LSTM ensemble
+- ML: XGBoost cross-sectional (19 tickers, 5y data), validado por TimesFM zero-shot (1min forecast)
 - Confluence: Multi-timeframe scoring (0-5 stars)
 
 ### Paper Trading Automation

@@ -6,6 +6,8 @@ and Alpaca Data API (incremental).
 """
 
 import logging
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -134,10 +136,13 @@ class DataFetcher:
         return df
 
     def save_to_csv(self, df: pd.DataFrame, ticker: str, interval: str) -> Path:
-        """Save DataFrame to CSV in data/raw/.
+        """Save DataFrame to CSV in data/raw/, merging with existing data.
+
+        Always preserves historical data by merging new data with existing CSV.
+        New data overwrites existing rows at the same timestamp (keep='last').
 
         Args:
-            df: OHLCV DataFrame.
+            df: OHLCV DataFrame (new data to add/merge).
             ticker: Symbol used for filename.
             interval: Interval used for filename.
 
@@ -147,9 +152,45 @@ class DataFetcher:
         safe_ticker = ticker.replace('/', '_').replace('-', '_')
         filename = f"{safe_ticker}_{interval}.csv"
         filepath = RAW_DATA_DIR / filename
-        df.to_csv(filepath)
-        logger.info(f"Saved {len(df)} rows to {filepath}")
+        try:
+            existing = self.load_from_csv(ticker, interval)
+            merged = self._merge_dataframes(existing, df)
+            self._atomic_write_csv(merged, filepath)
+            logger.info(f"Saved {len(merged)} rows to {filepath} "
+                        f"(merged {len(existing)} existing + {len(df)} new)")
+        except FileNotFoundError:
+            self._atomic_write_csv(df, filepath)
+            logger.info(f"Saved {len(df)} rows to {filepath} (new file)")
         return filepath
+
+    @staticmethod
+    def _atomic_write_csv(df: pd.DataFrame, filepath: Path) -> None:
+        """Write a CSV atomically (write tmp + rename).
+
+        If the process is killed mid-write (task scheduler timeout, laptop
+        sleep, crash), a direct df.to_csv(filepath) can leave the target
+        file truncated or with two rows glued together — this is exactly
+        what corrupted ETH_USD_1m.csv and silently broke that ticker's
+        pipeline on every subsequent run. Writing to a temp file in the
+        same directory then renaming guarantees the target is always
+        either the old complete file or the new one, never a partial mix.
+        """
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=filepath.parent,
+            suffix='.tmp',
+            prefix=f'{filepath.stem}_',
+        )
+        try:
+            os.close(fd)
+            df.to_csv(tmp_path)
+            os.replace(tmp_path, filepath)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def fetch_bulk(
         self,

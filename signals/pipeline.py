@@ -1,7 +1,7 @@
 """
 Unified Signal Pipeline
 ========================
-Consolidates all signal generation flows (technical, ML, ensemble, news)
+Consolidates all signal generation flows (technical, ML, TimesFM, news)
 into a single configurable pipeline.
 
 Usage:
@@ -30,7 +30,6 @@ from config.settings import (
     MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS_RAW,
     TELEGRAM_HEALTH_CHECK_ENABLED,
     SCALPING_SL_PERCENT, SCALPING_TP_PERCENT,
-    SWING_SL_PERCENT, SWING_TP_PERCENT,
 )
 from data.fetcher import DataFetcher
 from data.processor import DataProcessor
@@ -41,6 +40,11 @@ from signals.manager import SignalManager
 from signals.telegram_bot import TelegramNotifier
 
 logger = logging.getLogger(__name__)
+
+# Interval-aware staleness thresholds (hours).
+# 1d bars are timestamped at midnight UTC by Alpaca, so at 7am ET they appear ~35h old
+# even when current. 72h covers weekends (Fri close → Mon 7am ≈ 63h).
+_STALE_THRESHOLDS: dict[str, int] = {'1m': 2, '5m': 4, '15m': 8, '1h': 26, '1d': 72}
 
 
 def _build_pipeline_tickers() -> list['TickerConfig']:
@@ -113,7 +117,7 @@ class PipelineResult:
 class UnifiedPipeline:
     """Unified signal generation pipeline.
 
-    Consolidates technical analysis, ML prediction, ensemble voting,
+    Consolidates technical analysis, ML prediction, TimesFM validation,
     and news sentiment into a single flow.
     """
 
@@ -334,25 +338,20 @@ class UnifiedPipeline:
             confluence_min_stars=config.confluence_min_stars,
         )
 
-        # 3. ML filter (single model)
+        # 3. ML filter (XGBoost — validates/vetoes the technical signal)
         if self.use_ml and config.use_ml:
             result.ml_prediction = self._apply_ml(config.ticker, interval, df)
 
-        # 4. Ensemble prediction (LSTM + XGBoost)
-        if self.use_ensemble and config.use_ensemble:
-            result.ensemble_result = self._apply_ensemble(config.ticker, interval, df)
-
-        # 5. Compute final direction from all layers
+        # 4. Compute final direction from all layers
         self._compute_final_signal(result)
 
-        # 6. News sentiment (only for actionable signals to save API calls)
+        # 5. News sentiment (only for actionable signals to save API calls)
         if self.use_news and config.use_news and result.final_direction != 'HOLD':
             result.news_sentiment = self._apply_news(config.ticker, result)
 
-        # 7. Update Signal dataclass with pipeline enrichments
-        best_signal.ensemble_consensus = (
-            result.ensemble_result.get('consensus') if result.ensemble_result else None
-        )
+        # 6. Update Signal dataclass with pipeline enrichments
+        # (ensemble_consensus stays None here — TimesFM validates instead,
+        # applied as post-processing in run_all() via _apply_timesfm())
         best_signal.news_sentiment = result.news_sentiment
         best_signal.confluence_score = result.confluence_score
 
@@ -407,12 +406,7 @@ class UnifiedPipeline:
                 last_ts = last_ts.tz_localize(None)
             now_utc = datetime.utcnow()
             staleness_hours = (now_utc - last_ts).total_seconds() / 3600
-            # Interval-aware staleness threshold.
-            # 1d bars are timestamped at midnight UTC by Alpaca, so at 7am ET
-            # they always appear ~35h old even when fully up to date.
-            # 72h covers weekends (Fri close → Mon 7am ≈ 63h).
-            _stale_thresholds = {'1m': 2, '5m': 4, '15m': 8, '1h': 26, '1d': 72}
-            stale_threshold = _stale_thresholds.get(interval, 24)
+            stale_threshold = _STALE_THRESHOLDS.get(interval, 24)
             if used_fallback:
                 self._data_freshness[cache_key] = f"yfinance ({staleness_hours:.0f}h stale)"
             elif staleness_hours > stale_threshold:
@@ -426,15 +420,19 @@ class UnifiedPipeline:
         return df
 
     def _run_timesfm_batch(self, configs: list[TickerConfig]) -> None:
-        """Run TimesFM batch forecast using 1min data already in the run cache.
+        """Run TimesFM batch forecast using 1min data.
 
-        Results stored in self._tfm_results = {ticker: result_dict}.
-        Must be called AFTER the main pipeline run so that _run_cache is populated.
+        Fetches fresh 1m data incrementally from Alpaca (only new bars)
+        so TimesFM has recent data without running a separate 1m pipeline.
 
         Data priority for each ticker:
-          1. _run_cache['ticker_1m']  — fetched this run (zero extra API calls)
-          2. CSV on disk              — from last run (no API call, may be ~1h stale)
-          3. Skip ticker              — no data available
+          1. _run_cache['ticker_1m']  — already fetched this run (zero extra API calls)
+          2. Fresh Alpaca fetch       — incremental, only new bars
+          3. CSV on disk              — fallback (no API call, may be stale)
+          4. Skip ticker              — no data available
+
+        Does NOT track 1m entries in _data_freshness so the health check
+        only evaluates the primary trading interval (1h/1d).
         """
         self._tfm_results = {}
         if self.timesfm is None:
@@ -449,12 +447,20 @@ class UnifiedPipeline:
                 df = self._run_cache[cache_key]
             else:
                 try:
-                    df = self.fetcher.load_from_csv(ticker, '1m')
-                    df = TechnicalIndicators.add_all_indicators(df)
-                except FileNotFoundError:
-                    logger.debug("TimesFM: no 1min data for %s (no cache, no CSV)", ticker)
+                    df = self.fetcher.fetch_incremental(ticker, '1m')
+                    df = self.processor.clean_data(df)
+                    self.processor.validate_data(df)
+                    self.fetcher.save_to_csv(df, ticker, '1m')
+                    self._run_cache[cache_key] = df
+                    logger.debug("TimesFM: fresh 1m fetch for %s (%d rows)", ticker, len(df))
                 except Exception as e:
-                    logger.debug("TimesFM: CSV load failed for %s: %s", ticker, e)
+                    logger.debug("TimesFM: 1m fetch failed for %s: %s — trying CSV", ticker, e)
+                    try:
+                        df = self.fetcher.load_from_csv(ticker, '1m')
+                    except FileNotFoundError:
+                        logger.debug("TimesFM: no 1min data for %s (no cache, no CSV)", ticker)
+                    except Exception as e2:
+                        logger.debug("TimesFM: CSV load failed for %s: %s", ticker, e2)
 
             if df is not None and len(df) >= 512:
                 prices_1min[ticker] = df['close'].values
@@ -482,8 +488,9 @@ class UnifiedPipeline:
         if not self._tfm_results:
             return
 
+        supported = self.timesfm.SUPPORTED_INTERVALS
         for r in results:
-            if r.interval not in ('1m', '1h') or r.final_direction == 'HOLD':
+            if r.interval not in supported or r.final_direction == 'HOLD':
                 continue
             tfm = self._tfm_results.get(r.ticker)
             if tfm is None:
@@ -503,16 +510,15 @@ class UnifiedPipeline:
             # BUY:  SL = 10th pct at t=1 (below entry), TP = 80th pct at t=end (above entry)
             # SELL: SL = 80th pct at t=1 (above entry), TP = 10th pct at t=end (below entry)
             # Fallback to fixed % if quantiles are invalid or missing.
+            # SUPPORTED_INTERVALS contains only 1m and 1h, so scalping percentages always apply.
             quantiles = tfm.get('quantiles')
             entry = r.technical_signal.entry_price
-            sl_pct = SCALPING_SL_PERCENT if r.interval in ('1m', '1h') else SWING_SL_PERCENT
-            tp_pct = SCALPING_TP_PERCENT if r.interval in ('1m', '1h') else SWING_TP_PERCENT
             if r.final_direction == 'BUY':
-                fallback_sl = entry * (1 - sl_pct)
-                fallback_tp = entry * (1 + tp_pct)
+                fallback_sl = entry * (1 - SCALPING_SL_PERCENT)
+                fallback_tp = entry * (1 + SCALPING_TP_PERCENT)
             else:
-                fallback_sl = entry * (1 + sl_pct)
-                fallback_tp = entry * (1 - tp_pct)
+                fallback_sl = entry * (1 + SCALPING_SL_PERCENT)
+                fallback_tp = entry * (1 - SCALPING_TP_PERCENT)
 
             sl, tp = fallback_sl, fallback_tp  # default to fixed %
             if quantiles is not None and entry > 0:
@@ -559,18 +565,6 @@ class UnifiedPipeline:
             logger.debug(f"ML not available for {ticker} {interval}: {e}")
             return None
 
-    def _apply_ensemble(self, ticker: str, interval: str, df: pd.DataFrame) -> dict | None:
-        """Apply ensemble (LSTM + XGBoost) prediction."""
-        try:
-            from models.ensemble_predictor import EnsemblePredictor
-            ensemble = EnsemblePredictor(lstm_threshold=0.65, xgb_threshold=0.65)
-            ensemble.load(ticker, interval, models=['lstm', 'xgb'])
-            pred = ensemble.predict_next(df)
-            return pred.get('ensemble')
-        except (ImportError, FileNotFoundError, Exception) as e:
-            logger.debug(f"Ensemble not available for {ticker} {interval}: {e}")
-            return None
-
     def _apply_news(self, ticker: str, result: PipelineResult) -> dict | None:
         """Fetch and analyze news sentiment."""
         try:
@@ -588,7 +582,7 @@ class UnifiedPipeline:
     def _compute_final_signal(self, result: PipelineResult) -> None:
         """Compute final direction and confidence from all analysis layers.
 
-        Combines technical signal, ML prediction, and ensemble voting.
+        Combines technical signal with the ML (XGBoost) prediction.
         Updates result.final_direction and result.final_confidence in place.
         """
         tech_dir = result.technical_signal.direction
@@ -597,60 +591,18 @@ class UnifiedPipeline:
         # Start with technical signal
         final_dir = tech_dir
         final_conf = tech_conf
-        votes_buy = 0
-        votes_sell = 0
-        total_votes = 0
 
-        # Count technical vote
-        if tech_dir == 'BUY':
-            votes_buy += 1
-        elif tech_dir == 'SELL':
-            votes_sell += 1
-        total_votes += 1
-
-        # ML vote
+        # ML vote (XGBoost) — the only model that can veto or confirm
+        # the technical signal here. TimesFM validates separately, as
+        # post-processing over non-HOLD results (see _apply_timesfm()).
         if result.ml_prediction:
             ml_dir = result.ml_prediction.get('direction', 'HOLD')
             ml_conf = result.ml_prediction.get('confidence', 0)
-            if ml_dir == 'BUY':
-                votes_buy += 1
-            elif ml_dir == 'SELL':
-                votes_sell += 1
-            total_votes += 1
 
             # If ML strongly disagrees (>65%), downgrade
             if ml_dir != tech_dir and ml_conf > 0.65 and tech_dir != 'HOLD':
                 final_dir = 'HOLD'
                 final_conf = 0.0
-
-        # Ensemble vote
-        if result.ensemble_result:
-            ens_dir = result.ensemble_result.get('direction', 'HOLD')
-            ens_consensus = result.ensemble_result.get('consensus', 'WEAK')
-            ens_conf = result.ensemble_result.get('confidence', 0)
-
-            if ens_dir == 'BUY':
-                votes_buy += 1
-            elif ens_dir == 'SELL':
-                votes_sell += 1
-            total_votes += 1
-
-            # Strong ensemble agreement boosts confidence
-            if ens_consensus == 'STRONG' and ens_dir == tech_dir:
-                final_conf = min(1.0, (tech_conf + ens_conf) / 2 + 0.05)
-            # Strong ensemble disagreement forces HOLD
-            elif ens_consensus == 'STRONG' and ens_dir != tech_dir and tech_dir != 'HOLD':
-                final_dir = 'HOLD'
-                final_conf = 0.0
-
-        # If technical was HOLD but ML/ensemble agree on direction, upgrade
-        if tech_dir == 'HOLD' and total_votes >= 2:
-            if votes_buy >= 2 and result.ml_prediction and result.ml_prediction.get('confidence', 0) > 0.6:
-                final_dir = 'BUY'
-                final_conf = result.ml_prediction['confidence']
-            elif votes_sell >= 2 and result.ml_prediction and result.ml_prediction.get('confidence', 0) > 0.6:
-                final_dir = 'SELL'
-                final_conf = result.ml_prediction['confidence']
 
         result.final_direction = final_dir
         result.final_confidence = final_conf
@@ -662,11 +614,13 @@ class UnifiedPipeline:
         1. At least one actionable signal (base)
         2. Multiple timeframes agree OR ML confirms the direction
         3. Both ML confirms AND (multi-TF agree OR ML confidence >65%)
-        4. Ensemble has STRONG consensus
-        5. High confidence across all layers (avg >= 70%)
+        4. High confidence across all layers (avg >= 70%)
+
+        A 5th star can be added afterward by TimesFM validation, applied
+        as post-processing in run_all() (see _apply_timesfm()).
 
         Stars are additive: a signal with ML confirmation and multi-TF
-        agreement but no ensemble gets 3 stars.
+        agreement but no high-confidence average gets 3 stars.
         """
         if not results:
             return 0
@@ -699,16 +653,7 @@ class UnifiedPipeline:
         if ml_confirms and (multi_tf or ml_strong):
             stars += 1
 
-        # Star 4: Ensemble STRONG consensus (any interval)
-        ensemble_strong = any(
-            r.ensemble_result and r.ensemble_result.get('consensus') == 'STRONG'
-            and r.ensemble_result.get('direction') == r.final_direction
-            for r in results if r.final_direction != 'HOLD'
-        )
-        if ensemble_strong:
-            stars += 1
-
-        # Star 5: High average confidence (>70%)
+        # Star 4: High average confidence (>70%)
         actionable = [r for r in results if r.final_direction != 'HOLD']
         if actionable:
             avg_conf = sum(r.final_confidence for r in actionable) / len(actionable)
@@ -851,6 +796,15 @@ class UnifiedPipeline:
                 f"Ensemble: {ens.get('direction', 'N/A')} "
                 f"({ens.get('consensus', 'N/A')})"
             )
+
+        # TimesFM forecast (60-step min/max range)
+        tfm = self._tfm_results.get(result.ticker) if hasattr(self, '_tfm_results') else None
+        if tfm and tfm.get('forecast') is not None:
+            fc = tfm['forecast']
+            fmin, fmax = float(fc.min()), float(fc.max())
+            change = ((fc[-1] - tfm['last_price']) / tfm['last_price']) * 100
+            arrow = '\U0001f7e2' if change >= 0 else '\U0001f534'
+            lines.append(f"TimesFM: {arrow} {change:+.1f}% | ${fmin:,.2f} – ${fmax:,.2f}")
 
         if result.news_sentiment and result.news_sentiment.get('sentiment'):
             try:

@@ -7,11 +7,12 @@ Mocks Alpaca API and Telegram to test:
 - Telegram httpx-based sending
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from signals.generator import Signal
@@ -252,11 +253,30 @@ class TestPaperTradeCLI:
         assert 'PAPER TRADING COMPLETE' in result.output
 
     @patch('httpx.post')
-    def test_dry_run_shows_signals_no_trades(self, mock_httpx):
+    @patch('signals.manager.SignalManager')
+    @patch('signals.alpaca_broker.TradingClient')
+    def test_dry_run_shows_signals_no_trades(self, mock_tc, mock_manager_cls, mock_httpx):
         from click.testing import CliRunner
         from main import cli
 
         mock_httpx.return_value = MagicMock(status_code=200)
+
+        # Isolated broker: empty account, no existing positions/orders —
+        # must not touch the real Alpaca paper account.
+        acct = MagicMock()
+        acct.cash = 100000
+        acct.buying_power = 400000
+        acct.equity = 100000
+        acct.status = 'ACTIVE'
+        mock_tc.return_value.get_account.return_value = acct
+        mock_tc.return_value.get_all_positions.return_value = []
+        mock_tc.return_value.get_orders.return_value = []
+
+        # Isolated signal manager: no cooldown history — must not read the
+        # real logs/signals.csv, whose recent entries would otherwise
+        # trigger the 4h cooldown skip and hide the [DRY] line.
+        mock_manager_cls.return_value.get_history.return_value = pd.DataFrame()
+
         results = [
             _make_result(ticker='SPY', direction='BUY', confluence=3, conf=0.75),
         ]
@@ -268,6 +288,47 @@ class TestPaperTradeCLI:
 
         assert result.exit_code == 0
         assert 'DRY RUN' in result.output
+        assert '[DRY]' in result.output
+
+    @patch('httpx.post')
+    @patch('signals.manager.SignalManager')
+    @patch('signals.alpaca_broker.TradingClient')
+    def test_1m_signal_not_blocked_by_24h_cooldown(self, mock_tc, mock_manager_cls, mock_httpx):
+        """1m (scalping) signals must use the same short cooldown as 1h,
+        not the 24h swing cooldown. A signal logged 10h ago is older than
+        the 4h intraday cooldown but younger than the 24h swing one — it
+        should NOT be skipped for a 1m ticker.
+        """
+        from click.testing import CliRunner
+        from main import cli
+
+        mock_httpx.return_value = MagicMock(status_code=200)
+
+        acct = MagicMock()
+        acct.cash = 100000
+        acct.buying_power = 400000
+        acct.equity = 100000
+        acct.status = 'ACTIVE'
+        mock_tc.return_value.get_account.return_value = acct
+        mock_tc.return_value.get_all_positions.return_value = []
+        mock_tc.return_value.get_orders.return_value = []
+
+        ten_hours_ago = (datetime.now() - timedelta(hours=10)).isoformat()
+        mock_manager_cls.return_value.get_history.return_value = pd.DataFrame([{
+            'timestamp': ten_hours_ago, 'ticker': 'SPY', 'direction': 'BUY',
+        }])
+
+        results = [
+            _make_result(ticker='SPY', direction='BUY', confluence=3, conf=0.75, interval='1m'),
+        ]
+
+        runner = CliRunner()
+        with patch.object(UnifiedPipeline, 'run_all', return_value=results):
+            with patch.object(UnifiedPipeline, 'notify_actionable', return_value=0):
+                result = runner.invoke(cli, ['paper-trade', '--dry-run', '--interval', '1m'])
+
+        assert result.exit_code == 0
+        assert 'cooldown' not in result.output
         assert '[DRY]' in result.output
 
     def test_close_all_flag(self):

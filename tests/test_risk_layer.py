@@ -133,6 +133,21 @@ class TestPortfolioRiskChecks:
         assert result is not None
         assert "CRYPTO EXPOSURE" in result
 
+    def test_per_name_exposure_counts_existing_crypto_position(self):
+        """Alpaca's positions endpoint returns crypto symbols with no
+        separator ('SOLUSD'), while place_signal() checks with the slash
+        format ('SOL/USD'). If the lookup doesn't normalize, an existing
+        $9000 position is invisible and a second buy that would push
+        total exposure to 9.5% (over the 3% crypto cap) gets allowed.
+        """
+        positions = {
+            'SOLUSD': {'market_value': 9000},
+        }
+        broker = self._make_broker_with_positions(positions)
+        result = broker._check_portfolio_risk('SOL/USD', 500, 100000)
+        assert result is not None
+        assert "NAME EXPOSURE" in result
+
 
 class TestPositionSizing:
     """Tests for dynamic position sizing."""
@@ -236,6 +251,39 @@ class TestBrokerDedup:
         # BUY should be allowed (different direction, no open orders)
         result = broker._was_recently_attempted('SPY', 'BUY', hours=4)
         assert result is False
+
+
+class TestCryptoSymbolFormats:
+    """Alpaca is inconsistent about crypto symbol formats across endpoints:
+    positions come back as 'SOLUSD' (no separator), orders as 'SOL/USD'
+    (slash), and our internal ticker format is 'SOL-USD' (hyphen). Every
+    lookup that compares across these must normalize, or it silently
+    never matches.
+    """
+
+    def test_has_position_matches_noslash_alpaca_format(self):
+        broker = AlpacaBroker()
+        broker.get_open_positions = MagicMock(return_value={'SOLUSD': {}})
+        # place_signal() calls has_position() with the slash format
+        assert broker.has_position('SOL/USD') is True
+
+    def test_has_position_no_match_when_absent(self):
+        broker = AlpacaBroker()
+        broker.get_open_positions = MagicMock(return_value={'AAPL': {}})
+        assert broker.has_position('SOL/USD') is False
+
+    def test_dedup_matches_crypto_across_formats(self):
+        broker = AlpacaBroker()
+        mock_trading = MagicMock()
+        mock_order = MagicMock()
+        # Alpaca's order symbol comes back with a slash
+        mock_order.symbol = 'SOL/USD'
+        mock_trading.get_orders = MagicMock(return_value=[mock_order])
+        broker._trading = mock_trading
+
+        # place_signal() calls _was_recently_attempted() with our hyphen ticker
+        result = broker._was_recently_attempted('SOL-USD', 'BUY', hours=4)
+        assert result is True
 
 
 class TestTelegramDedup:

@@ -1034,8 +1034,11 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
             skipped += 1
             continue
 
-        # Signal cooldown: skip if same ticker+direction traded recently
-        cooldown_hours = 4 if r.interval == '1h' else 24
+        # Signal cooldown: skip if same ticker+direction traded recently.
+        # 1d is swing (24h cooldown); 1m/1h are both intraday (4h) — 1m
+        # used to fall into the 24h bucket by default, which meant a
+        # scalping ticker could only trade once a day even run every minute.
+        cooldown_hours = 24 if r.interval == '1d' else 4
         recent_signals = manager.get_history(ticker=r.ticker, n=10)
         if recent_signals is not None and not recent_signals.empty:
             from datetime import datetime, timedelta

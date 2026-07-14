@@ -61,6 +61,17 @@ def _is_crypto(ticker: str) -> bool:
     return ticker in ALPACA_CRYPTO or ticker.replace('/', '') in {''.join(k.split('-')) for k in ALPACA_CRYPTO}
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """Strip separators for cross-format symbol comparison.
+
+    Alpaca is inconsistent about crypto symbol formats across endpoints:
+    positions come back as 'SOLUSD', orders as 'SOL/USD'. Our internal
+    ticker format is 'SOL-USD'. Without normalizing, equality checks
+    between these silently never match.
+    """
+    return symbol.replace('/', '').replace('-', '').upper()
+
+
 @dataclass
 class TradeResult:
     symbol: str
@@ -126,7 +137,8 @@ class AlpacaBroker:
         return positions
 
     def has_position(self, symbol: str) -> bool:
-        return symbol in self.get_open_positions()
+        target = _normalize_symbol(symbol)
+        return any(_normalize_symbol(s) == target for s in self.get_open_positions())
 
     # ── Risk guards ──────────────────────────────────────────────────────
 
@@ -174,7 +186,11 @@ class AlpacaBroker:
                     f"(${new_total:,.0f} / ${equity:,.0f}). Rejecting {symbol}.")
 
         # 3) Per-name exposure
-        existing = positions.get(symbol, {}).get('market_value', 0)
+        target = _normalize_symbol(symbol)
+        existing = next(
+            (p['market_value'] for k, p in positions.items() if _normalize_symbol(k) == target),
+            0,
+        )
         name_total = existing + notional
         name_pct = name_total / equity if equity > 0 else 0
         limit = CRYPTO_MAX_SINGLE if _is_crypto(symbol.replace('/', '')) else MAX_NAME_EXPOSURE
@@ -200,6 +216,7 @@ class AlpacaBroker:
 
     def _was_recently_attempted(self, symbol: str, direction: str, hours: int = 4) -> bool:
         """Check if this symbol already has an open or recent order."""
+        target = _normalize_symbol(symbol)
         try:
             from alpaca.trading.requests import GetOrdersRequest
             from alpaca.trading.enums import QueryOrderStatus
@@ -207,7 +224,7 @@ class AlpacaBroker:
             req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=100)
             open_orders = self.trading.get_orders(filter=req)
             for o in open_orders:
-                if o.symbol == symbol:
+                if _normalize_symbol(o.symbol) == target:
                     return True
 
             # Also check recent filled/canceled orders
@@ -216,7 +233,7 @@ class AlpacaBroker:
             req2 = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=100, after=after)
             recent = self.trading.get_orders(filter=req2)
             for o in recent:
-                if o.symbol == symbol and o.side.value.upper() == direction:
+                if _normalize_symbol(o.symbol) == target and o.side.value.upper() == direction:
                     return True
         except Exception as e:
             logger.debug(f"Dedup check failed: {e}")
