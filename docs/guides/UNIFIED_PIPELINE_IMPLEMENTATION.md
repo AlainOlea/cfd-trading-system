@@ -16,7 +16,7 @@ The **Unified Signal Pipeline** consolidates 6 fragmented signal generation flow
 
 ### What Changed?
 - **Before**: 6 separate scripts (`live_signals.py`, `live_signals_ensemble.py`, etc.) with hardcoded tickers
-- **After**: 1 unified `signals/pipeline.py` + centralized configuration (`PIPELINE_TICKERS_RAW`)
+- **After**: 1 unified `signals/pipeline.py` + centralized configuration (`PIPELINE_TICKERS`)
 - **Benefit**: Consistency, reduced code duplication, centralized configuration, easier maintenance
 
 ### Key Improvements
@@ -309,23 +309,27 @@ python3 main.py pipeline --no-ml --no-news  # Tech only
 python3 main.py pipeline --no-telegram
 ```
 
-### Configuration: PIPELINE_TICKERS_RAW
+### Configuration: PIPELINE_TICKERS
 
-Edit `config/settings.py` to configure which tickers run in the pipeline:
+Edit `config/settings.py` to configure which tickers run in the pipeline. Each entry is a typed
+`TickerConfig` (from `config/ticker_types.py` — a small dataclass-only module with no dependency
+on `signals.pipeline`, so `config/settings.py` can build these directly without a circular import):
 
 ```python
-PIPELINE_TICKERS_RAW = [
-    # (ticker, category, intervals, strategies, use_ml, use_news, confluence_min)
-    ('GLD', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, 2),
-    ('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'ma_crossover'], True, False, 2),
-    ('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, 2),
-    ('MSFT', 'stocks', ['1d'], ['rsi_bb'], True, True, 3),
+from config.ticker_types import TickerConfig
+
+PIPELINE_TICKERS: list[TickerConfig] = [
+    # TickerConfig(ticker, category, intervals, strategies, use_ml, use_news, confluence_min)
+    TickerConfig('GLD', 'commodities', ['1d', '1h'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    TickerConfig('SPY', 'indices', ['1d', '1h'], ['macd_vwap', 'ma_crossover'], True, False, 2),
+    TickerConfig('BTC-USD', 'crypto', ['1d', '1h'], ['macd_vwap'], True, True, 2),
+    TickerConfig('MSFT', 'stocks', ['1d'], ['rsi_bb'], True, True, 3),
 ]
 ```
 
-**Tuples format:**
+**Fields:**
 ```
-(
+TickerConfig(
     ticker,              # 'GLD', 'SPY', 'BTC-USD'
     category,            # 'indices', 'stocks', 'crypto', 'commodities'
     intervals,           # ['1d', '1h', '15m']
@@ -335,6 +339,9 @@ PIPELINE_TICKERS_RAW = [
     confluence_min_stars # 0-5 (minimum to consider actionable)
 )
 ```
+
+`signals/pipeline.py` re-exports `TickerConfig` from `config.ticker_types`, so
+`from signals.pipeline import TickerConfig` (used everywhere else in the codebase) still works.
 
 ### Programmatic Usage
 
@@ -408,7 +415,7 @@ for ticker in tickers:
 ```bash
 # Now use:
 python3 main.py pipeline --category commodities --category indices
-# Or configure PIPELINE_TICKERS_RAW in settings.py
+# Or configure PIPELINE_TICKERS in settings.py
 ```
 
 #### Before: Calling `generator.generate()` directly

@@ -28,6 +28,7 @@ pytest tests/ -v                    # correr tests
 ## Project Structure
 ```
 config/settings.py          # Configuracion central (tickers, parametros, ML config)
+config/ticker_types.py      # TickerConfig dataclass (sin deps de signals.pipeline, evita import circular)
 main.py                     # CLI entry point (Click) - 17+ comandos
 data/fetcher.py             # DataFetcher: yfinance + CCXT + Alpaca incremental
 data/processor.py           # DataProcessor: limpieza y validacion

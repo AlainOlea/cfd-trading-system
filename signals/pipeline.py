@@ -27,10 +27,11 @@ from typing import Any
 import pandas as pd
 
 from config.settings import (
-    MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS_RAW,
+    MARKET_HOURS, TICKERS as TICKER_GROUPS, PIPELINE_TICKERS,
     TELEGRAM_HEALTH_CHECK_ENABLED,
     SCALPING_SL_PERCENT, SCALPING_TP_PERCENT,
 )
+from config.ticker_types import TickerConfig
 from data.fetcher import DataFetcher
 from data.processor import DataProcessor
 from indicators.technical import TechnicalIndicators
@@ -45,30 +46,6 @@ logger = logging.getLogger(__name__)
 # 1d bars are timestamped at midnight UTC by Alpaca, so at 7am ET they appear ~35h old
 # even when current. 72h covers weekends (Fri close → Mon 7am ≈ 63h).
 _STALE_THRESHOLDS: dict[str, int] = {'1m': 2, '5m': 4, '15m': 8, '1h': 26, '1d': 72}
-
-
-def _build_pipeline_tickers() -> list['TickerConfig']:
-    """Build TickerConfig list from raw tuples in settings.py."""
-    return [
-        TickerConfig(
-            ticker=t[0], category=t[1], intervals=t[2], strategies=t[3],
-            use_ml=t[4], use_news=t[5],
-            confluence_min_stars=t[6],
-        )
-        for t in PIPELINE_TICKERS_RAW
-    ]
-
-
-@dataclass
-class TickerConfig:
-    """Configuration per ticker for the pipeline."""
-    ticker: str
-    category: str                   # indices, stocks, crypto, commodities
-    intervals: list[str]            # ['1d', '1h', '15m']
-    strategies: list[str]           # ['macd_vwap', 'rsi_bb']
-    use_ml: bool = True
-    use_news: bool = True
-    confluence_min_stars: int = 2   # minimum to consider actionable
 
 
 @dataclass
@@ -195,7 +172,7 @@ class UnifiedPipeline:
             List of all PipelineResult objects.
         """
         if configs is None:
-            configs = _build_pipeline_tickers()
+            configs = list(PIPELINE_TICKERS)
 
         # Apply filters
         if category and category != 'all':

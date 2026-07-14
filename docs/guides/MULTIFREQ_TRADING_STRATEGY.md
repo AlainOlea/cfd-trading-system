@@ -293,7 +293,7 @@ python main.py signal --strategy macd_vwap --ticker GLD --interval 15m
 ### Cómo se implementó multi-período (actualización: ya no es un script separado)
 
 `live_signals_multifreq.py` nunca se construyó como script aparte — el enfoque multi-período
-terminó implementado directamente en `config/settings.py`: cada ticker en `PIPELINE_TICKERS_RAW`
+terminó implementado directamente en `config/settings.py`: cada ticker en `PIPELINE_TICKERS`
 declara su propia lista de intervalos (ej. `['1d', '1h', '1m']`), y `UnifiedPipeline` los corre
 todos automáticamente por ticker — no hace falta pasar un flag de intervalos por CLI.
 
@@ -364,7 +364,7 @@ Win rate: 56% (muchos más trades)
 ### Immediate (Hoy)
 
 1. **Generar señales en múltiples períodos** (ya implementado — cada ticker en
-   `PIPELINE_TICKERS_RAW` declara sus propios intervalos, no hace falta un flag)
+   `PIPELINE_TICKERS` declara sus propios intervalos, no hace falta un flag)
    ```bash
    python3 main.py pipeline
    ```
