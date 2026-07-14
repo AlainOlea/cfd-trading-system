@@ -372,29 +372,8 @@ NUM_JOBS = 4
 RANDOM_SEED = 42
 
 # ============================================
-# BROKER SETTINGS (Future)
+# ALERTS & NOTIFICATIONS
 # ============================================
-
-# OANDA settings (for future API integration)
-OANDA_ACCOUNT_ID = os.getenv('OANDA_ACCOUNT_ID', '')
-OANDA_API_KEY = os.getenv('OANDA_API_KEY', '')
-OANDA_ENVIRONMENT = 'practice'  # 'practice' or 'live'
-
-# Interactive Brokers settings
-IB_ACCOUNT = os.getenv('IB_ACCOUNT', '')
-IB_HOST = '127.0.0.1'
-IB_PORT = 7497
-
-# ============================================
-# ALERTS & NOTIFICATIONS (Future)
-# ============================================
-
-# Email alerts
-EMAIL_ALERTS_ENABLED = False
-EMAIL_FROM = os.getenv('EMAIL_FROM', '')
-EMAIL_TO = os.getenv('EMAIL_TO', '')
-SMTP_SERVER = 'smtp.gmail.com'
-SMTP_PORT = 587
 
 # Telegram alerts
 TELEGRAM_ALERTS_ENABLED = True

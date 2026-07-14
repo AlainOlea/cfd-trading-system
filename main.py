@@ -244,28 +244,7 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, 
         result = engine.run(strat, df, ticker=ticker, interval=interval, predictor=predictor, delay_sec=delay)
 
         # 4.5 Filter result by date if provided (AFTER backtest to keep history for ML)
-        if start_date or end_date:
-            mask = pd.Series(True, index=result.signals_df.index)
-            if start_date:
-                mask &= (result.signals_df.index >= start_date)
-            if end_date:
-                mask &= (result.signals_df.index <= end_date)
-            
-            filtered_signals = result.signals_df[mask]
-            
-            # Re-run VectorBT on the filtered signals
-            import vectorbt as vbt
-            new_portfolio = vbt.Portfolio.from_signals(
-                close=filtered_signals['close'],
-                entries=filtered_signals['signal'] == 'BUY',
-                exits=filtered_signals['signal'] == 'SELL',
-                init_cash=initial_capital,
-                fees=engine.commission,
-                slippage=engine.slippage,
-                freq=engine._interval_to_freq(interval),
-            )
-            result.portfolio = new_portfolio
-            result.signals_df = filtered_signals
+        result = engine.filter_by_date_range(result, start_date, end_date)
 
         # 5. Calculate metrics
         metrics = PerformanceMetrics.calculate_all(result)
@@ -1146,20 +1125,13 @@ def paper_status(csv_path):
         click.echo("  No open positions.")
 
     # Show pending orders
-    try:
-        from dotenv import load_dotenv; load_dotenv()
-        import os
-        from alpaca.trading.client import TradingClient
-        client = TradingClient(os.getenv('ALPACA_API_KEY'), os.getenv('ALPACA_SECRET_KEY'), paper=True)
-        orders = client.get_orders()
-        if orders:
-            click.echo(f"\n  Pending Orders: {len(orders)}")
-            click.echo(f"  {'Symbol':<8} {'Side':<6} {'Qty':>8} {'Type':>8} {'Status':>12}")
-            click.echo(f"  {'─'*8} {'─'*6} {'─'*8} {'─'*8} {'─'*12}")
-            for o in orders:
-                click.echo(f"  {o.symbol:<8} {str(o.side):<6} {o.qty:>8} {str(o.type):>8} {str(o.status):>12}")
-    except Exception:
-        pass
+    orders = broker.get_pending_orders()
+    if orders:
+        click.echo(f"\n  Pending Orders: {len(orders)}")
+        click.echo(f"  {'Symbol':<8} {'Side':<6} {'Qty':>8} {'Type':>8} {'Status':>12}")
+        click.echo(f"  {'─'*8} {'─'*6} {'─'*8} {'─'*8} {'─'*12}")
+        for o in orders:
+            click.echo(f"  {o['symbol']:<8} {o['side']:<6} {o['qty']:>8} {o['type']:>8} {o['status']:>12}")
 
 
 @cli.command('paper-close')

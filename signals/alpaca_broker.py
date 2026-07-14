@@ -136,6 +136,21 @@ class AlpacaBroker:
             logger.error(f"Failed to get positions: {e}")
         return positions
 
+    def get_pending_orders(self) -> list[dict]:
+        orders = []
+        try:
+            for o in self.trading.get_orders():
+                orders.append({
+                    'symbol': o.symbol,
+                    'side': str(o.side),
+                    'qty': o.qty,
+                    'type': str(o.type),
+                    'status': str(o.status),
+                })
+        except Exception as e:
+            logger.error(f"Failed to get pending orders: {e}")
+        return orders
+
     def has_position(self, symbol: str) -> bool:
         target = _normalize_symbol(symbol)
         return any(_normalize_symbol(s) == target for s in self.get_open_positions())

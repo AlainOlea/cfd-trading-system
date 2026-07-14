@@ -123,6 +123,39 @@ class BacktestEngine:
         )
         return result
 
+    def filter_by_date_range(
+        self,
+        result: BacktestResult,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> BacktestResult:
+        """Restrict a completed backtest to a date range, re-running the portfolio.
+
+        Applied AFTER run() so indicators/ML predictions still see the full
+        history for warmup; only the resulting trade simulation is windowed.
+        """
+        if not start_date and not end_date:
+            return result
+
+        mask = pd.Series(True, index=result.signals_df.index)
+        if start_date:
+            mask &= (result.signals_df.index >= start_date)
+        if end_date:
+            mask &= (result.signals_df.index <= end_date)
+
+        filtered_signals = result.signals_df[mask]
+        result.portfolio = vbt.Portfolio.from_signals(
+            close=filtered_signals['close'],
+            entries=filtered_signals['signal'] == 'BUY',
+            exits=filtered_signals['signal'] == 'SELL',
+            init_cash=self.initial_capital,
+            fees=self.commission,
+            slippage=self.slippage,
+            freq=self._interval_to_freq(result.interval),
+        )
+        result.signals_df = filtered_signals
+        return result
+
     def _process_ml_row(self, idx, signals_df, df, predictor, delay_sec):
         """Internal helper to process a single signal row with ML."""
         # Get data slice up to current index for prediction
