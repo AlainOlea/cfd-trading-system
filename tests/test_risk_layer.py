@@ -12,7 +12,7 @@ import pytest
 from signals.alpaca_broker import AlpacaBroker, _is_crypto, _is_stock
 from signals.telegram_bot import TelegramNotifier
 from signals.generator import Signal
-from signals.pipeline import UnifiedPipeline
+from signals.pipeline import PipelineResult, UnifiedPipeline
 from signals.manager import SignalManager
 
 
@@ -573,6 +573,58 @@ class TestPerClassMLMetrics:
         assert metrics['accuracy'] == 1.0
         for cls_name in ['bearish', 'neutral', 'bullish']:
             assert metrics['per_class'][cls_name]['f1'] == 1.0
+
+
+# ─── TimesFM Strategy-Aware SL/TP ──────────────────────────────────
+
+
+class TestTimesFMStrategyAware:
+    """TimesFM's momentum-forecast SL/TP must not overwrite a mean-reversion
+    strategy's own exit thesis (e.g. rsi_bb targeting bb_middle) — but the
+    confluence bonus is strategy-agnostic and should still apply.
+    """
+
+    def _make_result(self, strategy, direction, ticker='GLD', interval='1h'):
+        sig = Signal(
+            strategy=strategy, ticker=ticker, interval=interval,
+            direction=direction, entry_price=100.0,
+            stop_loss=99.3, take_profit=97.0, confidence=0.6,
+        )
+        return PipelineResult(
+            ticker=ticker, interval=interval, technical_signal=sig,
+            final_direction=direction, final_confidence=0.6,
+            confluence_score=3,
+        )
+
+    def _pipeline(self, ticker='GLD', direction=-1):
+        p = UnifiedPipeline.__new__(UnifiedPipeline)
+        p.timesfm = MagicMock(SUPPORTED_INTERVALS=frozenset({'1m', '1h'}))
+        p._tfm_results = {ticker: {'direction': direction, 'quantiles': None, 'last_price': 100.0}}
+        return p
+
+    def test_mean_reversion_strategy_keeps_its_own_sl_tp(self):
+        p = self._pipeline()
+        result = self._make_result('rsi_bb', 'SELL')
+        p._apply_timesfm([result])
+        assert result.technical_signal.stop_loss == 99.3
+        assert result.technical_signal.take_profit == 97.0
+
+    def test_momentum_strategy_sl_tp_overwritten_by_fallback(self):
+        from config.settings import SCALPING_SL_PERCENT, SCALPING_TP_PERCENT
+
+        p = self._pipeline()
+        result = self._make_result('macd_vwap', 'SELL')
+        p._apply_timesfm([result])
+        expected_sl = 100.0 * (1 + SCALPING_SL_PERCENT)
+        expected_tp = 100.0 * (1 - SCALPING_TP_PERCENT)
+        assert result.technical_signal.stop_loss == pytest.approx(expected_sl)
+        assert result.technical_signal.take_profit == pytest.approx(expected_tp)
+
+    def test_confluence_bonus_still_applies_to_mean_reversion(self):
+        p = self._pipeline()
+        result = self._make_result('rsi_bb', 'SELL')
+        p._apply_timesfm([result])
+        assert result.confluence_score == 4  # TimesFM direction agrees -> +1
 
 
 # ─── Integration Tests ──────────────────────────────────────────────

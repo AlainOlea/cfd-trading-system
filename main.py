@@ -1099,13 +1099,31 @@ def paper_trade(category, ticker, interval, no_ml, no_ensemble, no_news, no_tele
 
 
 @cli.command('paper-status')
-def paper_status():
+@click.option('--csv', 'csv_path', type=click.Path(), default=None,
+              help='Export open positions to CSV file (e.g. results/open_positions.csv)')
+def paper_status(csv_path):
     """Check Alpaca paper trading account status and open positions."""
+    import csv as csv_module
     from signals.alpaca_broker import AlpacaBroker
 
     broker = AlpacaBroker()
     if not broker.is_configured:
         click.echo("ALPACA_API_KEY not set in .env")
+        return
+
+    if csv_path:
+        positions = broker.get_open_positions()
+        if not positions:
+            click.echo("  No open positions to export.")
+            return
+        fieldnames = ['symbol', 'qty', 'avg_entry', 'current_price',
+                      'market_value', 'unrealized_pl', 'unrealized_pl_pct']
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv_module.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for sym, pos in positions.items():
+                writer.writerow({'symbol': sym, **{k: pos[k] for k in fieldnames if k != 'symbol'}})
+        click.echo(f"  Exported {len(positions)} open positions -> {csv_path}")
         return
 
     click.echo("\n  ALPACA PAPER TRADING ACCOUNT")

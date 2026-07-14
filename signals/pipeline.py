@@ -511,6 +511,14 @@ class UnifiedPipeline:
             # SELL: SL = 80th pct at t=1 (above entry), TP = 10th pct at t=end (below entry)
             # Fallback to fixed % if quantiles are invalid or missing.
             # SUPPORTED_INTERVALS contains only 1m and 1h, so scalping percentages always apply.
+            #
+            # This is a momentum-continuation forecast — it has no relation to a
+            # mean-reversion strategy's own exit thesis (distance back to a mean,
+            # e.g. bb_middle), so mean-reversion strategies keep their own SL/TP.
+            strategy_cls = STRATEGY_MAP.get(r.technical_signal.strategy)
+            if strategy_cls is not None and strategy_cls.mean_reversion:
+                continue
+
             quantiles = tfm.get('quantiles')
             entry = r.technical_signal.entry_price
             if r.final_direction == 'BUY':

@@ -1,5 +1,6 @@
 """Tests for trading strategy modules."""
 
+import pandas as pd
 import pytest
 
 from strategies import STRATEGY_MAP
@@ -68,6 +69,32 @@ class TestRSIBBStrategy:
         result = s.generate_signals(df_with_indicators)
         valid_signals = {'BUY', 'SELL', 'HOLD'}
         assert set(result['signal'].unique()).issubset(valid_signals)
+
+    def test_is_mean_reversion(self):
+        assert RSIBBStrategy().mean_reversion is True
+
+    def _touching_lower_bb_df(self, adx_value):
+        return pd.DataFrame({
+            'close': [100.0] * 5,
+            'rsi': [25.0] * 5,       # oversold
+            'bb_lower': [101.0] * 5,  # close <= bb_lower -> touch
+            'bb_upper': [110.0] * 5,
+            'bb_middle': [105.0] * 5,
+            'adx': [adx_value] * 5,
+        }, index=pd.date_range('2026-01-01', periods=5, freq='1min'))
+
+    def test_require_ranging_suppresses_signal_in_strong_trend(self):
+        s = RSIBBStrategy()
+        assert s.require_ranging is True
+        df = self._touching_lower_bb_df(adx_value=35.0)  # strongly trending
+        result = s.generate_signals(df)
+        assert (result['signal'] == 'HOLD').all()
+
+    def test_require_ranging_allows_signal_when_ranging(self):
+        s = RSIBBStrategy()
+        df = self._touching_lower_bb_df(adx_value=10.0)  # ranging
+        result = s.generate_signals(df)
+        assert (result['signal'] == 'BUY').any()
 
 
 class TestMACrossoverStrategy:

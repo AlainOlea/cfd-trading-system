@@ -24,6 +24,14 @@ RSI_BB_SL_PERCENT = 0.007  # 0.7% stop loss for this strategy
 class RSIBBStrategy(BaseStrategy):
     """RSI + Bollinger Bands mean-reversion strategy for scalping."""
 
+    # Mean reversion needs a range to revert within — suppress signals when
+    # ADX confirms a strong trend (see require_ranging in BaseStrategy).
+    require_ranging: bool = True
+
+    # Exit target is "distance back to bb_middle", not a momentum continuation —
+    # must not be overwritten by TimesFM's trend-forecast SL/TP.
+    mean_reversion: bool = True
+
     @property
     def name(self) -> str:
         return 'rsi_bb'
@@ -53,6 +61,12 @@ class RSIBBStrategy(BaseStrategy):
             raise ValueError(f"Missing columns for {self.name}: {missing}")
 
         valid = df['rsi'].notna() & df['bb_lower'].notna()
+
+        # Market regime filter: skip signals in strongly trending markets —
+        # a mean-reversion entry needs room to revert before the stop is hit.
+        if self.require_ranging:
+            ranging = ~self._is_trending(df)
+            valid = valid & ranging
 
         oversold = RSI_PARAMS['oversold']
         overbought = RSI_PARAMS['overbought']

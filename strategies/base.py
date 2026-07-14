@@ -21,10 +21,21 @@ class BaseStrategy(ABC):
     # Subclasses can set this to True to suppress BUY/SELL signals in ranging markets.
     require_trend: bool = False
 
+    # Subclasses can set this to True to suppress BUY/SELL signals in trending
+    # markets (ADX confirms a trend) — for mean-reversion strategies, where a
+    # strong trend means price may never revert before the stop is hit.
+    require_ranging: bool = False
+
     # Set to True to use ATR-based dynamic SL/TP instead of fixed percentages.
     # SL = entry ± ATR_SL_MULTIPLIER × ATR(14)
     # TP = entry ± ATR_TP_MULTIPLIER × ATR(14)
     use_atr_sl: bool = False
+
+    # Mean-reversion strategies (target = distance back to a mean, e.g. bb_middle)
+    # must not have their SL/TP overwritten by TimesFM's momentum-continuation
+    # forecast in UnifiedPipeline._apply_timesfm() — that forecast has no relation
+    # to "reversion to the mean" and corrupts the strategy's own exit thesis.
+    mean_reversion: bool = False
 
     @property
     @abstractmethod
