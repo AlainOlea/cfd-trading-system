@@ -87,6 +87,9 @@ Detailed API documentation for all modules.
 - `BacktestResult` dataclass: strategy_name, ticker, interval, portfolio (vbt.Portfolio), signals_df, initial_capital
 - `BacktestEngine(initial_capital, commission, slippage)` uses config/settings.py defaults
 - `run(strategy, df, ticker, interval)` -> BacktestResult. Uses VectorBT Portfolio.from_signals()
+- `filter_by_date_range(result, start_date, end_date)` -> BacktestResult, re-runs the VectorBT
+  portfolio windowed to a date range (applied after `run()` so indicators/ML still see full
+  history for warmup). Used by the `backtest` CLI's `--start-date`/`--end-date` options
 - `_interval_to_freq(interval)` -> pandas frequency string for VectorBT
 
 ## backtesting/metrics.py - PerformanceMetrics
@@ -106,7 +109,9 @@ Detailed API documentation for all modules.
 ## signals/pipeline.py - Unified Signal Pipeline
 
 - `UnifiedPipeline` class: Consolidates all signal flows (technical + ML + TimesFM + news)
-- `TickerConfig` dataclass: Per-ticker configuration (strategies, intervals, layers)
+- `TickerConfig` dataclass: Per-ticker configuration (strategies, intervals, layers). Defined in
+  `config/ticker_types.py` (no dependency on this module, so `config/settings.py` can build
+  typed `PIPELINE_TICKERS` without a circular import) and re-exported here
 - `PipelineResult` dataclass: Complete output with all analysis layers
 - `run_all(category, ticker_filter)` -> List[PipelineResult]. Parallel processing with ThreadPoolExecutor
 - `run_ticker(config)` -> List[PipelineResult]. One per interval, shared data cache
@@ -132,7 +137,8 @@ Detailed API documentation for all modules.
 
 ## signals/manager.py - SignalManager
 
-- `log_signal(signal)` -> appends to logs/signals.csv (DictWriter, 12 columns)
+- `log_signal(signal)` -> appends to logs/signals.csv (DictWriter, 15 columns; `ensemble_consensus`
+  is a leftover column kept for CSV-schema stability, always empty now that the ensemble layer is gone)
 - `get_history(ticker, n)` -> DataFrame with last N signals (optional ticker filter)
 - `format_signal(signal)` -> formatted terminal block with entry/SL/TP/RR/confidence
 - `format_history(df)` -> tabular display of signal history
@@ -149,6 +155,8 @@ Detailed API documentation for all modules.
 
 - `place_signal(signal, interval)` -> executes bracket orders on Alpaca paper sandbox
 - `get_open_positions()` -> dict of current positions with P&L
+- `get_pending_orders()` -> list of open (unfilled) orders. Used by `paper-status` instead of a
+  raw second `TradingClient`
 - `has_position(symbol)` -> checks if holding a position
 - `_normalize_symbol(symbol)` -> strips `/` and `-` for cross-format comparison. Alpaca returns
   crypto symbols inconsistently across endpoints (`SOL/USD` on orders, `SOLUSD` on positions; our

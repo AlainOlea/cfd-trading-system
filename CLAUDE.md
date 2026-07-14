@@ -29,7 +29,7 @@ pytest tests/ -v                    # correr tests
 ```
 config/settings.py          # Configuracion central (tickers, parametros, ML config)
 config/ticker_types.py      # TickerConfig dataclass (sin deps de signals.pipeline, evita import circular)
-main.py                     # CLI entry point (Click) - 17+ comandos
+main.py                     # CLI entry point (Click) - 16 comandos
 data/fetcher.py             # DataFetcher: yfinance + CCXT + Alpaca incremental
 data/processor.py           # DataProcessor: limpieza y validacion
 data/alpaca_data.py         # AlpacaDataFetcher: Alpaca Data API wrapper (stocks + crypto)
