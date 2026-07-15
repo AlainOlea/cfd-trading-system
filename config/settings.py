@@ -140,6 +140,26 @@ MA_PARAMS = {
     'slow': 200
 }
 
+# SuperTrend Parameters (for SuperTrend strategy)
+SUPERTREND_PARAMS = {
+    'length': 10,       # ATR lookback
+    'multiplier': 3.0,  # ATR band multiplier
+}
+
+# Pivot Points Parameters (for Pivot Points strategy)
+PIVOT_PARAMS = {
+    'proximity_pct': 0.002,  # price within 0.2% of a level counts as a touch
+    'rsi_confirm': True,     # require RSI confirmation on bounces
+}
+
+# Fibonacci Retracement Parameters (for Fibonacci strategy)
+FIBONACCI_PARAMS = {
+    'swing_window': 50,           # bars to detect swing high/low
+    'levels': [0.382, 0.5, 0.618],  # retracement entry levels
+    'proximity_pct': 0.003,       # price within 0.3% of a level counts as a touch
+    'sl_level': 0.786,            # stop-loss placed beyond this retracement
+}
+
 # Stochastic Oscillator Parameters
 STOCHASTIC_PARAMS = {
     'period': 14,

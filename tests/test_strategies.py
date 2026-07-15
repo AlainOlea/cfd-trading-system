@@ -126,3 +126,116 @@ class TestPositionSizing:
             capital=10000, risk_per_trade=0.02, stop_loss_pct=0,
         )
         assert size == 0
+
+
+class TestSuperTrendStrategy:
+    """Tests for SuperTrend strategy."""
+
+    def test_registered(self):
+        assert 'supertrend' in STRATEGY_MAP
+
+    def test_has_required_properties(self):
+        from strategies.scalping.supertrend import SuperTrendStrategy
+        s = SuperTrendStrategy()
+        assert s.name == 'supertrend'
+        assert s.timeframe is not None
+        assert s.description is not None
+
+    def test_generate_signals_columns(self, df_with_indicators):
+        from strategies.scalping.supertrend import SuperTrendStrategy
+        result = SuperTrendStrategy().generate_signals(df_with_indicators)
+        for col in ['signal', 'entry_price', 'stop_loss', 'take_profit', 'confidence']:
+            assert col in result.columns, f"Missing column: {col}"
+        assert set(result['signal'].unique()).issubset({'BUY', 'SELL', 'HOLD'})
+
+    def test_sl_on_losing_side(self, df_with_indicators):
+        from strategies.scalping.supertrend import SuperTrendStrategy
+        result = SuperTrendStrategy().generate_signals(df_with_indicators)
+        buys = result[result['signal'] == 'BUY']
+        sells = result[result['signal'] == 'SELL']
+        assert (buys['stop_loss'] < buys['entry_price']).all()
+        assert (buys['take_profit'] > buys['entry_price']).all()
+        assert (sells['stop_loss'] > sells['entry_price']).all()
+        assert (sells['take_profit'] < sells['entry_price']).all()
+
+    def test_confidence_in_range(self, df_with_indicators):
+        from strategies.scalping.supertrend import SuperTrendStrategy
+        result = SuperTrendStrategy().generate_signals(df_with_indicators)
+        assert (result['confidence'] >= 0).all()
+        assert (result['confidence'] <= 1).all()
+
+
+class TestPivotPointsStrategy:
+    """Tests for Pivot Points strategy."""
+
+    def test_registered(self):
+        assert 'pivot_points' in STRATEGY_MAP
+
+    def test_has_required_properties(self):
+        from strategies.scalping.pivot_points import PivotPointsStrategy
+        s = PivotPointsStrategy()
+        assert s.name == 'pivot_points'
+        assert s.mean_reversion is True   # keeps TimesFM from overwriting SL/TP
+        assert s.require_ranging is True
+
+    def test_generate_signals_columns(self, df_with_indicators):
+        from strategies.scalping.pivot_points import PivotPointsStrategy
+        result = PivotPointsStrategy().generate_signals(df_with_indicators)
+        for col in ['signal', 'entry_price', 'stop_loss', 'take_profit', 'confidence']:
+            assert col in result.columns, f"Missing column: {col}"
+        assert set(result['signal'].unique()).issubset({'BUY', 'SELL', 'HOLD'})
+
+    def test_sl_on_losing_side(self, df_with_indicators):
+        from strategies.scalping.pivot_points import PivotPointsStrategy
+        result = PivotPointsStrategy().generate_signals(df_with_indicators)
+        buys = result[result['signal'] == 'BUY']
+        sells = result[result['signal'] == 'SELL']
+        assert (buys['stop_loss'] < buys['entry_price']).all()
+        assert (buys['take_profit'] > buys['entry_price']).all()
+        assert (sells['stop_loss'] > sells['entry_price']).all()
+        assert (sells['take_profit'] < sells['entry_price']).all()
+
+    def test_requires_datetime_index(self):
+        from strategies.scalping.pivot_points import PivotPointsStrategy
+        df = pd.DataFrame({
+            'open': [1.0], 'high': [1.0], 'low': [1.0],
+            'close': [1.0], 'volume': [1.0],
+        })
+        with pytest.raises(ValueError, match='DatetimeIndex'):
+            PivotPointsStrategy().generate_signals(df)
+
+
+class TestFibonacciStrategy:
+    """Tests for Fibonacci retracement strategy."""
+
+    def test_registered(self):
+        assert 'fibonacci' in STRATEGY_MAP
+
+    def test_has_required_properties(self):
+        from strategies.swing.fibonacci import FibonacciStrategy
+        s = FibonacciStrategy()
+        assert s.name == 'fibonacci'
+        assert s.require_trend is True
+
+    def test_generate_signals_columns(self, df_with_indicators):
+        from strategies.swing.fibonacci import FibonacciStrategy
+        result = FibonacciStrategy().generate_signals(df_with_indicators)
+        for col in ['signal', 'entry_price', 'stop_loss', 'take_profit', 'confidence']:
+            assert col in result.columns, f"Missing column: {col}"
+        assert set(result['signal'].unique()).issubset({'BUY', 'SELL', 'HOLD'})
+
+    def test_sl_on_losing_side(self, df_with_indicators):
+        from strategies.swing.fibonacci import FibonacciStrategy
+        result = FibonacciStrategy().generate_signals(df_with_indicators)
+        buys = result[result['signal'] == 'BUY']
+        sells = result[result['signal'] == 'SELL']
+        assert (buys['stop_loss'] < buys['entry_price']).all()
+        assert (buys['take_profit'] > buys['entry_price']).all()
+        assert (sells['stop_loss'] > sells['entry_price']).all()
+        assert (sells['take_profit'] < sells['entry_price']).all()
+
+    def test_short_df_returns_hold(self, df_with_indicators):
+        from strategies.swing.fibonacci import FibonacciStrategy
+        short = df_with_indicators.head(10)
+        result = FibonacciStrategy().generate_signals(short)
+        assert (result['signal'] == 'HOLD').all()
