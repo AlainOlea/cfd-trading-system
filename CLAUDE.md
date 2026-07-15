@@ -45,11 +45,13 @@ backtesting/report.py       # BacktestReport: HTML + plotly
 signals/pipeline.py         # UnifiedPipeline: consolidacion de flujos
 signals/generator.py        # SignalGenerator + Signal dataclass
 signals/manager.py          # SignalManager: log CSV, historial
+signals/store.py            # SignalStore: SQLite (logs/signals.db), desglose ML/TimesFM/estrellas por senal
 signals/telegram_bot.py     # TelegramNotifier: senales via Telegram
 signals/alpaca_broker.py    # AlpacaBroker: paper trading bracket orders
 models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/timesfm_predictor.py # TimesFMPredictor: zero-shot 1min forecast, validates XGBoost signal
 scripts/                    # Utility scripts (training, comparison, backfill)
+scripts/replay_signals.py   # Replay: resuelve senales historicas vs datos 1min (TP o SL primero) — ver docs/guides/SIGNAL_REPLAY_GUIDE.md
 tests/                      # 147 tests (all passing)
 ```
 
@@ -76,6 +78,12 @@ que invocan `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper-trad
 | MACD + VWAP | Scalping (momentum) | MACD cross + VWAP filter | 0.5% | 1% | `require_trend` (needs ADX >= 20) |
 | RSI + BB | Scalping (mean reversion) | RSI oversold/overbought + BB touch | 0.7% | bb_middle | `require_ranging` (needs ADX < 20) |
 | MA Crossover | Swing | SMA50/200 golden/death cross | 2% | 3% | none |
+| SuperTrend | Scalping (momentum) | SuperTrend(10,3) flip | ST line | 2x SL dist | `require_trend` |
+| Pivot Points | Scalping (mean reversion) | Rebote S1/S2, rechazo R1/R2 | next level | PP | `require_ranging` |
+| Fibonacci | Swing | Pullback a 38.2/50/61.8% en tendencia | tras 78.6% | swing extreme | `require_trend` |
+
+SuperTrend/Pivot Points/Fibonacci estan registradas en `STRATEGY_MAP` para backtest y replay,
+pero NO activadas en `PIPELINE_TICKERS` (produccion) — se evaluan primero con datos.
 
 `mean_reversion=True` on `RSIBBStrategy` also tells `UnifiedPipeline._apply_timesfm()` to
 leave its SL/TP alone — TimesFM's momentum-continuation forecast has no relation to a

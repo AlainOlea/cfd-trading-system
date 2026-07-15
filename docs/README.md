@@ -25,6 +25,7 @@ docs/
 ├── guides/
 │   ├── NEWS_ANALYZER_SETUP.md
 │   ├── SIGNAL_GENERATION_GUIDE.md
+│   ├── SIGNAL_REPLAY_GUIDE.md
 │   ├── MULTIFREQ_TRADING_STRATEGY.md
 │   ├── GPU_SETUP.md
 │   ├── UNIFIED_PIPELINE_IMPLEMENTATION.md
@@ -77,6 +78,7 @@ stops tracking any file under it.)
 
 ### For Traders
 - Strategy logic: `guides/SIGNAL_GENERATION_GUIDE.md`
+- Signal replay / reliability analysis: `guides/SIGNAL_REPLAY_GUIDE.md`
 - News setup: `guides/NEWS_ANALYZER_SETUP.md`
 - Multi-timeframe approach: `guides/MULTIFREQ_TRADING_STRATEGY.md`
 

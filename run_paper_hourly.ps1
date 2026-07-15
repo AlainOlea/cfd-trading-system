@@ -22,5 +22,5 @@ cd $ProjectDir && source venv/bin/activate
 echo '========================================'
 echo 'Hourly (1h) signals: '`$(date -u '+%Y-%m-%d %H:%M UTC')
 echo '========================================'
-python3 main.py paper-trade --interval 1h --no-news --min-confluence 2 --min-confidence 60 2>&1 | tee -a $LogDir/hourly_${Date}.log
+python3 main.py paper-trade --interval 1h --no-news --min-confluence 3 --min-confidence 60 2>&1 | tee -a $LogDir/hourly_${Date}.log
 "@

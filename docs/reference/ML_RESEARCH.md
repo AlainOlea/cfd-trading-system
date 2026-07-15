@@ -208,10 +208,17 @@ Signals are rated 1-5 stars based on agreement across layers:
 | 1★ | At least one actionable signal (BUY/SELL) | Base |
 | 2★ | Multi-timeframe agreement OR ML confirms | Independent |
 | 3★ | ML confirms AND (multi-TF OR ML confidence >65%) | High quality |
-| 4★ | Ensemble STRONG consensus | Very high |
-| 5★ | Average confidence across layers ≥70% | Maximum |
+| 4★ | Average confidence across layers ≥70% | Very high |
+| 5★ | TimesFM forecast direction matches technical signal (+1 bonus, 1m/1h only) | Maximum |
 
 **Current cron filter**: 3★ minimum. Signals below 3 stars are logged but not traded and not sent to Telegram.
+
+**Known limitation**: under the cron jobs each run covers a single interval
+(`--interval 1h` / `--interval 1d`), so multi-timeframe agreement never fires —
+stars 2-3 depend entirely on the XGBoost vote in production. See
+`UnifiedPipeline._compute_confluence()` docstring. Each star's rationale is
+persisted per-signal in `logs/signals.db` (columns `star_base`, `star_agree`,
+`star_ml_strong`, `star_conf`, `star_tfm`).
 
 ---
 
