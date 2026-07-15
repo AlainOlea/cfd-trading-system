@@ -7,6 +7,13 @@ import pandas as pd
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_signal_store(tmp_path, monkeypatch):
+    """Keep tests from writing fixture signals into the real logs/signals.db."""
+    import signals.store as store_mod
+    monkeypatch.setattr(store_mod, 'SIGNALS_DB_FILE', tmp_path / 'signals_test.db')
+
+
 @pytest.fixture
 def sample_ohlcv_df():
     """Generate a synthetic OHLCV DataFrame for testing (100 rows)."""

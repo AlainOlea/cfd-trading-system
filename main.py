@@ -159,7 +159,7 @@ def fetch_data(ticker, interval, days, source):
 # ============================================
 
 @cli.command('backtest')
-@click.option('--strategy', required=True, type=click.Choice(['macd_vwap', 'rsi_bb', 'ma_crossover']),
+@click.option('--strategy', required=True, type=click.Choice(['macd_vwap', 'rsi_bb', 'ma_crossover', 'supertrend', 'pivot_points', 'fibonacci']),
               help='Strategy to backtest')
 @click.option('--ticker', default='SPY', help='Ticker symbol')
 @click.option('--interval', default='1m', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
@@ -256,7 +256,7 @@ def backtest(strategy, ticker, interval, start_date, end_date, initial_capital, 
 # ============================================
 
 @cli.command('signal')
-@click.option('--strategy', required=True, type=click.Choice(['macd_vwap', 'rsi_bb', 'ma_crossover']),
+@click.option('--strategy', required=True, type=click.Choice(['macd_vwap', 'rsi_bb', 'ma_crossover', 'supertrend', 'pivot_points', 'fibonacci']),
               help='Strategy to use')
 @click.option('--ticker', default='SPY', help='Ticker symbol')
 @click.option('--interval', default='1m', type=click.Choice(['1m', '5m', '15m', '1h', '1d']),
@@ -798,6 +798,7 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
     from signals.pipeline import UnifiedPipeline
     from signals.alpaca_broker import AlpacaBroker, TradeResult
     from signals.manager import SignalManager
+    from datetime import datetime, timedelta
     import time
 
     use_ml = not no_ml
@@ -854,6 +855,18 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
     )
     actionable = [r for r in results if r.is_actionable()]
 
+    # Log every evaluated result (incl. HOLD) to the SQLite store with full
+    # layer breakdown; decision fields are updated below as they happen.
+    from signals.store import SignalStore
+    store = SignalStore()
+    run_id = f"paper-{interval}-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+    store_ids: dict[int, int] = {}
+    for r in results:
+        try:
+            store_ids[id(r)] = store.log_result(r, run_id=run_id)
+        except Exception as e:
+            logger.warning(f"SignalStore log failed for {r.ticker} {r.interval}: {e}")
+
     # Send Telegram only for quality signals (3+ stars, before trade filter)
     if send_telegram:
         quality = [r for r in actionable if r.confluence_score >= min_confluence]
@@ -861,6 +874,13 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
             sent_count = pipeline.notify_actionable(quality)
             if sent_count > 0:
                 click.echo(f"  Telegram: {sent_count} notification(s) sent")
+            for r in quality:
+                if id(r) in store_ids:
+                    store.update_decision(
+                        store_ids[id(r)],
+                        telegram_sent=getattr(r, 'telegram_sent_ok', False),
+                        telegram_message=getattr(r, 'telegram_message', None),
+                    )
         else:
             click.echo(f"  Telegram: no signals with {min_confluence}+ stars")
 
@@ -877,13 +897,19 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
     trades: list[TradeResult] = []
     skipped = 0
     dry_count = 0
+    def _mark_skip(res, reason: str) -> None:
+        if id(res) in store_ids:
+            store.update_decision(store_ids[id(res)], skip_reason=reason)
+
     for r in actionable:
         # Apply quality filters
         if r.confluence_score < min_confluence:
             skipped += 1
+            _mark_skip(r, 'below_stars')
             continue
         if r.final_confidence * 100 < min_confidence:
             skipped += 1
+            _mark_skip(r, 'below_confidence')
             continue
 
         # Signal cooldown: skip if same ticker+direction traded recently.
@@ -893,7 +919,6 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
         cooldown_hours = 24 if r.interval == '1d' else 4
         recent_signals = manager.get_history(ticker=r.ticker, n=10)
         if recent_signals is not None and not recent_signals.empty:
-            from datetime import datetime, timedelta
             cutoff = datetime.now() - timedelta(hours=cooldown_hours)
             recent_signals['ts'] = pd.to_datetime(recent_signals['timestamp'], errors='coerce')
             recent_same = recent_signals[
@@ -902,6 +927,7 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
             ]
             if not recent_same.empty:
                 skipped += 1
+                _mark_skip(r, 'cooldown')
                 click.echo(
                     f"  [SKIP] {r.ticker} {r.technical_signal.direction} — "
                     f"cooldown ({cooldown_hours}h since last signal)"
@@ -932,8 +958,15 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
                 f"{result.qty:.2f} sh @ ~${result.entry_price:.2f} | "
                 f"SL=${result.stop_loss:.2f} TP=${result.take_profit:.2f} | "
                 f"conf={result.confidence:.0%} | "
+                f"stars={r.confluence_score}/5 | "
                 f"{'OK' if result.placed else result.reason}"
             )
+            if id(r) in store_ids:
+                store.update_decision(
+                    store_ids[id(r)],
+                    trade_placed=result.placed,
+                    skip_reason='' if result.placed else str(result.reason),
+                )
             # Dedup window: 4h for intraday (1h), 24h for swing (1d)
             window = 24 if r.interval == '1d' else 4
             manager.log_signal(r.technical_signal, window_hours=window)

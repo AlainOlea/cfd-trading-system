@@ -61,6 +61,10 @@ class PipelineResult:
     final_direction: str = 'HOLD'       # BUY/SELL/HOLD
     final_confidence: float = 0.0
     timestamp: datetime = field(default_factory=datetime.now)
+    # Why each star was earned (keys: base, agree, ml_strong, conf, tfm, multi_tf)
+    star_breakdown: dict = field(default_factory=dict)
+    # TimesFM forecast applied to this result (keys: direction_label, agrees, sl, tp)
+    tfm_forecast: dict | None = None
 
     def is_actionable(self) -> bool:
         """Check if this result has an actionable signal."""
@@ -146,9 +150,10 @@ class UnifiedPipeline:
 
         # Compute multi-timeframe confluence across all intervals
         if results:
-            confluence = self._compute_confluence(results)
+            confluence, breakdown = self._compute_confluence(results)
             for r in results:
                 r.confluence_score = confluence
+                r.star_breakdown = dict(breakdown)
 
         return results
 
@@ -467,10 +472,18 @@ class UnifiedPipeline:
                 continue
 
             tech_dir = +1 if r.final_direction == 'BUY' else -1
+            tfm_agrees = tfm['direction'] == tech_dir
+            r.tfm_forecast = {
+                'direction_label': 'BUY' if tfm['direction'] == +1 else 'SELL',
+                'agrees': tfm_agrees,
+                'sl': None,
+                'tp': None,
+            }
 
             # Confluence bonus
-            if tfm['direction'] == tech_dir and r.confluence_score < 5:
+            if tfm_agrees and r.confluence_score < 5:
                 r.confluence_score += 1
+                r.star_breakdown['tfm'] = True
                 logger.debug(
                     "TimesFM +1 confluence for %s %s → %d stars",
                     r.ticker, r.interval, r.confluence_score,
@@ -513,6 +526,9 @@ class UnifiedPipeline:
 
             r.technical_signal.stop_loss = sl
             r.technical_signal.take_profit = tp
+            if r.tfm_forecast is not None:
+                r.tfm_forecast['sl'] = sl
+                r.tfm_forecast['tp'] = tp
             logger.debug(
                 "TimesFM SL/TP for %s %s %s: SL=%.4f TP=%.4f",
                 r.ticker, r.interval, r.final_direction, sl, tp,
@@ -578,7 +594,7 @@ class UnifiedPipeline:
         result.final_direction = final_dir
         result.final_confidence = final_conf
 
-    def _compute_confluence(self, results: list[PipelineResult]) -> int:
+    def _compute_confluence(self, results: list[PipelineResult]) -> tuple[int, dict]:
         """Compute multi-timeframe confluence score (0-5 stars).
 
         Stars:
@@ -592,18 +608,33 @@ class UnifiedPipeline:
 
         Stars are additive: a signal with ML confirmation and multi-TF
         agreement but no high-confidence average gets 3 stars.
+
+        KNOWN LIMITATION: multi-TF agreement requires results from >= 2
+        intervals in the same run. The cron jobs (run_paper_hourly.ps1 /
+        run_paper_daily.ps1) pass --interval 1h/1d, which restricts each
+        run to a single interval — so under cron, multi_tf is always False
+        and stars 2-3 depend entirely on the ML (XGBoost) vote.
+
+        Returns:
+            (stars, breakdown) where breakdown flags why each star was
+            earned: {base, agree, multi_tf, ml_confirms, ml_strong, conf}.
         """
+        breakdown = {
+            'base': False, 'agree': False, 'multi_tf': False,
+            'ml_confirms': False, 'ml_strong': False, 'conf': False,
+        }
         if not results:
-            return 0
+            return 0, breakdown
 
         stars = 0
         directions = [r.final_direction for r in results if r.final_direction != 'HOLD']
 
         if not directions:
-            return 0
+            return 0, breakdown
 
         # Star 1: At least one actionable signal
         stars += 1
+        breakdown['base'] = True
 
         # Star 2: Multiple timeframes agree OR ML confirms
         multi_tf = len(directions) >= 2 and len(set(directions)) == 1
@@ -611,8 +642,11 @@ class UnifiedPipeline:
             r.ml_prediction and r.ml_prediction.get('direction') == r.final_direction
             for r in results if r.final_direction != 'HOLD'
         )
+        breakdown['multi_tf'] = multi_tf
+        breakdown['ml_confirms'] = ml_confirms
         if multi_tf or ml_confirms:
             stars += 1
+            breakdown['agree'] = True
 
         # Star 3: ML confirms AND (multi-TF or strong ML conviction >65%)
         ml_strong = any(
@@ -623,6 +657,7 @@ class UnifiedPipeline:
         )
         if ml_confirms and (multi_tf or ml_strong):
             stars += 1
+            breakdown['ml_strong'] = True
 
         # Star 4: High average confidence (>70%)
         actionable = [r for r in results if r.final_direction != 'HOLD']
@@ -630,8 +665,9 @@ class UnifiedPipeline:
             avg_conf = sum(r.final_confidence for r in actionable) / len(actionable)
             if avg_conf >= 0.70:
                 stars += 1
+                breakdown['conf'] = True
 
-        return min(stars, 5)
+        return min(stars, 5), breakdown
 
     # ─── Output formatting ───────────────────────────────────────
 
@@ -752,10 +788,29 @@ class UnifiedPipeline:
         lines.append(f"Conf:   {result.final_confidence:.0%}")
 
         if result.ml_prediction:
+            ml_dir = result.ml_prediction['direction']
+            ml_mark = '✓' if ml_dir == result.final_direction else '✗'
             lines.append(
-                f"ML:     {result.ml_prediction['direction']} "
+                f"ML:     {ml_mark} {ml_dir} "
                 f"({result.ml_prediction['confidence']:.0%})"
             )
+
+        # Star breakdown: why this signal earned its stars
+        b = result.star_breakdown
+        if b:
+            parts = []
+            if b.get('multi_tf'):
+                parts.append('✓ multi-TF')
+            if b.get('ml_confirms'):
+                parts.append('✓ ML confirma')
+            if b.get('ml_strong'):
+                parts.append('✓ ML fuerte >65%')
+            if b.get('conf'):
+                parts.append('✓ conf ≥70%')
+            if b.get('tfm'):
+                parts.append('✓ TimesFM')
+            if parts:
+                lines.append(f"Stars:  {' | '.join(parts)}")
         # TimesFM forecast (60-step min/max range)
         tfm = self._tfm_results.get(result.ticker) if hasattr(self, '_tfm_results') else None
         if tfm and tfm.get('forecast') is not None:
@@ -824,10 +879,21 @@ class UnifiedPipeline:
                     continue
                 try:
                     msg = self.format_telegram_message(result)
-                    self.notifier.send_alert(msg)
-                    dedup_state[dedup_key] = now
-                    sent += 1
+                    result.telegram_message = msg
+                    ok = self.notifier.send_alert(msg)
+                    result.telegram_sent_ok = ok
+                    if ok:
+                        # Only mark dedup on confirmed delivery — a silent API
+                        # failure must not block retries for the next 4 hours.
+                        dedup_state[dedup_key] = now
+                        sent += 1
+                    else:
+                        logger.warning(
+                            f"Telegram send failed for {result.ticker} "
+                            f"(API error); message preserved in signals.db"
+                        )
                 except Exception as e:
+                    result.telegram_sent_ok = False
                     logger.warning(f"Telegram notification failed for {result.ticker}: {e}")
 
         # Save dedup state to file
