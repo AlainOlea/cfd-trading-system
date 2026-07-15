@@ -434,16 +434,16 @@ WATCH_STRATEGIES = ['macd_vwap', 'rsi_bb']  # Default strategies for watch mode
 PIPELINE_TICKERS: list[TickerConfig] = [
     # Indices
     TickerConfig('SPY', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
-    TickerConfig('QQQ', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb', 'supertrend'], True, True, 2),
-    TickerConfig('IWM', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'supertrend', 'pivot_points'], True, True, 2),
+    TickerConfig('QQQ', 'indices', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    TickerConfig('IWM', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
     TickerConfig('DIA', 'indices', ['1d', '1h', '1m'], ['macd_vwap'], True, True, 2),
     # Commodities
     TickerConfig('GLD', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     TickerConfig('SLV', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
-    TickerConfig('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    TickerConfig('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb', 'supertrend'], True, True, 2),
     TickerConfig('UNG', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     # Stocks
-    TickerConfig('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb', 'pivot_points'], True, True, 2),
+    TickerConfig('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     TickerConfig('NVDA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     TickerConfig('MSFT', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'supertrend'], True, True, 2),
     TickerConfig('AMZN', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),

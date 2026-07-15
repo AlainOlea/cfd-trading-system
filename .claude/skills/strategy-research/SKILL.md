@@ -34,12 +34,15 @@ Para cada estrategia elegida:
    registrar en `STRATEGY_MAP`, agregar al `click.Choice` de `main.py`,
    tests en `tests/test_strategies.py` (mínimo: columnas, SL/TP del lado
    correcto, valores de señal válidos).
-2. Backtest en varios tickers/intervalos:
-   `python3 main.py backtest --strategy X --ticker Y --interval Z`
+2. Backtest contra **TODOS los tickers de `PIPELINE_TICKERS`** (los 19), en los
+   intervalos que la estrategia declara. Nunca un subconjunto "representativo":
+   la decisión de activación es por ticker, así que cada ticker necesita su número.
    Reportar: retorno, # trades, win rate, profit factor, y comparación contra
    la estrategia existente más parecida en los mismos datos.
-3. Advertir siempre: el backtest sale por señal opuesta, no por SL/TP como el
-   paper trading real; pocos trades (<20) = resultado no confiable.
+3. Simular salidas por SL/TP (bracket, como el paper trading real) usando
+   `sl_stop`/`tp_stop` de VectorBT con las distancias de la propia señal —
+   NO por señal opuesta, que infla retornos con posiciones nunca cerradas.
+4. Advertir siempre: pocos trades (<20) = resultado no confiable.
 
 **COMPUERTA 2:** presentar números sin filtrar (no hay umbral automático — el
 usuario juzga). Preguntar: ¿a productivo, o se descarta? Si se descarta, la
