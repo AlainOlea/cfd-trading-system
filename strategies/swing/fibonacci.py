@@ -24,9 +24,16 @@ from strategies.base import BaseStrategy
 
 
 class FibonacciStrategy(BaseStrategy):
-    """Trend-pullback entries at Fibonacci retracement levels."""
+    """Trend-pullback entries at Fibonacci retracement levels.
 
-    require_trend: bool = True  # retracement entries only make sense in a trend
+    NOTE: require_trend (ADX at the entry bar) is deliberately OFF. ADX falls
+    during pullbacks by construction, so gating the touch bar on ADX >= 20
+    suppressed nearly every valid retracement entry (audit 2026-07-14: SPY had
+    22 level touches in a year, 0 survived the ADX filter). Trend context
+    comes from the SMA50 side filter plus the time-ordered impulse check.
+    """
+
+    require_trend: bool = False
 
     @property
     def name(self) -> str:
@@ -70,15 +77,33 @@ class FibonacciStrategy(BaseStrategy):
         rng = swing_high - swing_low
         valid = rng.notna() & (rng > 0)
 
-        if self.require_trend:
-            valid = valid & self._is_trending(df)
+        # Time-ordered impulse: a fib retracement is drawn from swing low TO
+        # swing high (bullish impulse) — the low must come BEFORE the high.
+        # Rolling max/min alone can pick a min that happened AFTER the max
+        # (i.e. mid-correction), which shifts every level. Track when each
+        # extreme occurred and require the right order per direction.
+        high_pos = df['high'].rolling(window).apply(lambda x: x.argmax(), raw=True).shift(1)
+        low_pos = df['low'].rolling(window).apply(lambda x: x.argmin(), raw=True).shift(1)
+        bullish_impulse = low_pos < high_pos   # low first, then high → uptrend impulse
+        bearish_impulse = high_pos < low_pos   # high first, then low → downtrend impulse
 
         # Trend direction: price relative to SMA50 (fallback: close vs window mean)
         if 'sma_50' in df.columns:
             uptrend = df['close'] > df['sma_50']
         else:
             uptrend = df['close'] > df['close'].rolling(window).mean()
-        downtrend = ~uptrend
+        uptrend = uptrend & bullish_impulse
+        downtrend = ~uptrend & bearish_impulse
+
+        # Entry confirmation: RSI supports the bounce (canonical practice) —
+        # oversold-ish on pullback buys, overbought-ish on rally sells.
+        if 'rsi' in df.columns:
+            rsi_buy_ok = df['rsi'] < 50
+            rsi_sell_ok = df['rsi'] > 50
+        else:
+            rsi_buy_ok = rsi_sell_ok = pd.Series(True, index=df.index)
+        uptrend = uptrend & rsi_buy_ok
+        downtrend = downtrend & rsi_sell_ok
 
         for level in FIBONACCI_PARAMS['levels']:
             # Uptrend pullback: retracement measured down from swing high

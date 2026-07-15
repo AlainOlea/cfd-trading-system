@@ -215,7 +215,9 @@ class TestFibonacciStrategy:
         from strategies.swing.fibonacci import FibonacciStrategy
         s = FibonacciStrategy()
         assert s.name == 'fibonacci'
-        assert s.require_trend is True
+        # ADX gate stays off: it suppresses pullback entries by construction
+        # (see class docstring). Trend context = SMA50 + time-ordered impulse.
+        assert s.require_trend is False
 
     def test_generate_signals_columns(self, df_with_indicators):
         from strategies.swing.fibonacci import FibonacciStrategy
