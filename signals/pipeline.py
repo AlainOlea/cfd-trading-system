@@ -451,6 +451,19 @@ class UnifiedPipeline:
         except Exception as e:
             logger.warning("TimesFM batch forecast failed: %s", e)
             self._tfm_results = {}
+            return
+
+        # Persist every forecast (full 60-step path + quantile bands) so its
+        # accuracy can be validated later against the real 1m candles —
+        # including runs where no signal fired (scripts/validate_tfm_forecasts.py).
+        try:
+            from signals.store import SignalStore
+            store = SignalStore()
+            run_id = f"tfm-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+            for ticker, tfm in self._tfm_results.items():
+                store.log_tfm_forecast(ticker, tfm, run_id=run_id)
+        except Exception as e:
+            logger.warning("Failed to persist TimesFM forecasts: %s", e)
 
     def _apply_timesfm(self, results: list['PipelineResult']) -> None:
         """Apply TimesFM results to already-computed pipeline results.

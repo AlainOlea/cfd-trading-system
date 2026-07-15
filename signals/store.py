@@ -64,6 +64,26 @@ _SIGNALS_SCHEMA: dict[str, str] = {
     'extras': 'TEXT',
 }
 
+_TFM_SCHEMA: dict[str, str] = {
+    'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
+    'ts': 'TEXT',                # when the forecast was made
+    'run_id': 'TEXT',
+    'ticker': 'TEXT',
+    'last_price': 'REAL',        # price at forecast time
+    'direction': 'INTEGER',      # +1 / -1 (sign of forecast[-1] - last_price)
+    'confidence': 'REAL',
+    # Temporal order of extremes within the 60-min forecast path:
+    # if min_first=1 on a BUY, the model expects the dip BEFORE the rally —
+    # key to auditing the SL-at-t=1 / TP-at-t=60 quantile asymmetry.
+    'min_pos': 'INTEGER',        # index (0-59) of forecast minimum
+    'max_pos': 'INTEGER',        # index of forecast maximum
+    'min_first': 'INTEGER',
+    'forecast': 'TEXT',          # JSON array, 60 floats (point forecast)
+    'q10': 'TEXT',               # JSON array, 10th percentile path
+    'q80': 'TEXT',               # JSON array, 80th percentile path
+    'extras': 'TEXT',
+}
+
 _REPLAY_SCHEMA: dict[str, str] = {
     'id': 'INTEGER PRIMARY KEY AUTOINCREMENT',
     'signal_id': 'INTEGER',           # FK -> signals.id
@@ -97,7 +117,8 @@ class SignalStore:
         """Create tables and auto-add any missing columns (additive-only)."""
         with self._connect() as conn:
             for table, schema in (('signals', _SIGNALS_SCHEMA),
-                                  ('replay_results', _REPLAY_SCHEMA)):
+                                  ('replay_results', _REPLAY_SCHEMA),
+                                  ('tfm_forecasts', _TFM_SCHEMA)):
                 cols_sql = ', '.join(f'{c} {t}' for c, t in schema.items())
                 conn.execute(f'CREATE TABLE IF NOT EXISTS {table} ({cols_sql})')
 
@@ -180,6 +201,38 @@ class SignalStore:
         vals.append(signal_id)
         with self._connect() as conn:
             conn.execute(f"UPDATE signals SET {', '.join(sets)} WHERE id = ?", vals)
+
+    def log_tfm_forecast(self, ticker: str, tfm: dict, *, run_id: str = '') -> int:
+        """Persist a full TimesFM forecast (60-step path + quantile bands).
+
+        `tfm` is the dict from TimesFMPredictor._build_result(): direction,
+        forecast (np.ndarray), quantiles (60x10), confidence, last_price.
+        """
+        fc = tfm.get('forecast')
+        q = tfm.get('quantiles')
+        fc_list = [round(float(x), 6) for x in fc] if fc is not None else []
+        min_pos = max_pos = None
+        min_first = None
+        if fc_list:
+            min_pos = int(min(range(len(fc_list)), key=fc_list.__getitem__))
+            max_pos = int(max(range(len(fc_list)), key=fc_list.__getitem__))
+            min_first = int(min_pos < max_pos)
+        row = {
+            'ts': datetime.now().isoformat(),
+            'run_id': run_id,
+            'ticker': ticker,
+            'last_price': tfm.get('last_price'),
+            'direction': tfm.get('direction'),
+            'confidence': tfm.get('confidence'),
+            'min_pos': min_pos,
+            'max_pos': max_pos,
+            'min_first': min_first,
+            'forecast': json.dumps(fc_list),
+            'q10': json.dumps([round(float(x), 6) for x in q[:, 1]]) if q is not None else '',
+            'q80': json.dumps([round(float(x), 6) for x in q[:, 8]]) if q is not None else '',
+            'extras': '',
+        }
+        return self._insert('tfm_forecasts', row)
 
     def log_replay(self, signal_id: int, outcome: str, *,
                    bars_to_resolution: int | None = None,
