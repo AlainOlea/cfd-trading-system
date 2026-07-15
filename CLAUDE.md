@@ -52,7 +52,8 @@ models/xgboost_model.py     # XGBoostTrader: primary ML model
 models/timesfm_predictor.py # TimesFMPredictor: zero-shot 1min forecast, validates XGBoost signal
 scripts/                    # Utility scripts (training, comparison, backfill)
 scripts/replay_signals.py   # Replay: resuelve senales historicas vs datos 1min (TP o SL primero) — ver docs/guides/SIGNAL_REPLAY_GUIDE.md
-tests/                      # 147 tests (all passing)
+scripts/validate_tfm_forecasts.py  # Valida forecasts TimesFM (tabla tfm_forecasts) vs velas 1min reales
+tests/                      # 162 tests (all passing)
 ```
 
 ## Key Features
@@ -80,10 +81,14 @@ que invocan `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper-trad
 | MA Crossover | Swing | SMA50/200 golden/death cross | 2% | 3% | none |
 | SuperTrend | Scalping (momentum) | SuperTrend(10,3) flip | ST line | 2x SL dist | `require_trend` |
 | Pivot Points | Scalping (mean reversion) | Rebote S1/S2, rechazo R1/R2 | next level | PP | `require_ranging` |
-| Fibonacci | Swing | Pullback a 38.2/50/61.8% en tendencia | tras 78.6% | swing extreme | `require_trend` |
+| Fibonacci | Swing | Pullback a 38.2/50/61.8% en tendencia (SMA50 + impulso low→high ordenado + RSI) | tras 78.6% | swing extreme | none (ADX suprime pullbacks) |
 
-SuperTrend/Pivot Points/Fibonacci estan registradas en `STRATEGY_MAP` para backtest y replay,
-pero NO activadas en `PIPELINE_TICKERS` (produccion) — se evaluan primero con datos.
+Estado de activacion (bateria 19 tickers con salidas bracket SL/TP, 2026-07-15):
+- SuperTrend: ACTIVA solo en MSFT y USO (evidencia robusta; negativa en cripto/AMZN/META)
+- Pivot Points: en STRATEGY_MAP pero NO activa (negativa en 17/19 tickers con brackets reales)
+- Fibonacci: en STRATEGY_MAP pero NO activa (mediocre tras corregir ADX/orden temporal)
+Nuevas estrategias: usar la skill `/strategy-research` — exige backtest en TODOS los
+tickers con salidas SL/TP (vbt sl_stop/tp_stop), nunca por senal opuesta.
 
 `mean_reversion=True` on `RSIBBStrategy` also tells `UnifiedPipeline._apply_timesfm()` to
 leave its SL/TP alone — TimesFM's momentum-continuation forecast has no relation to a

@@ -4,7 +4,7 @@
 
 ## What it is
 
-Two tools that together answer *"was the system right?"* using data instead of anecdotes:
+Tools that together answer *"was the system right?"* using data instead of anecdotes:
 
 1. **`signals/store.py` (`SignalStore`)** — SQLite store at `logs/signals.db`. Every
    pipeline run under `paper-trade` logs one row per evaluated ticker+interval (including
@@ -12,7 +12,11 @@ Two tools that together answer *"was the system right?"* using data instead of a
    TimesFM agreement, per-star rationale (`star_base` … `star_tfm`), whether Telegram was
    sent, whether the trade was placed, and the skip reason if not
    (`below_stars`, `below_confidence`, `cooldown`, `Already holding X`, broker errors).
-2. **`scripts/replay_signals.py`** — resolves every BUY/SELL signal (traded or NOT)
+2. **`tfm_forecasts` table** — every TimesFM batch persists the full 60-step
+   forecast path + q10/q80 bands + temporal order of extremes (`min_first`).
+   Validate against reality with `scripts/validate_tfm_forecasts.py` (direction
+   accuracy, min/max order accuracy, MAE%, band coverage).
+3. **`scripts/replay_signals.py`** — resolves every BUY/SELL signal (traded or NOT)
    against the 1-minute candles in `data/raw/{TICKER}_1m.csv`: which was touched first,
    TP (win) or SL (loss)? Results land in the `replay_results` table and an aggregate
    reliability report prints win rate and P&L by strategy, stars, ticker, interval, and
