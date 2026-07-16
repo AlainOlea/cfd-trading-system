@@ -17,8 +17,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest, StopOrderRequest, LimitOrderRequest
+from alpaca.trading.requests import MarketOrderRequest, StopLimitOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+from alpaca.data.historical.stock import StockHistoricalDataClient
+from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+from alpaca.data.requests import StockLatestTradeRequest, CryptoLatestTradeRequest
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +95,8 @@ class AlpacaBroker:
         self.api_key = os.getenv('ALPACA_API_KEY', '')
         self.secret_key = os.getenv('ALPACA_SECRET_KEY', '')
         self._trading: TradingClient | None = None
+        self._stock_data: StockHistoricalDataClient | None = None
+        self._crypto_data: CryptoHistoricalDataClient | None = None
         self._session_high_equity: float = 0.0
         self._halted: bool = False
 
@@ -106,6 +111,40 @@ class AlpacaBroker:
                 raise RuntimeError("Alpaca API keys not configured")
             self._trading = TradingClient(self.api_key, self.secret_key, paper=True)
         return self._trading
+
+    @property
+    def stock_data(self) -> StockHistoricalDataClient:
+        if self._stock_data is None:
+            if not self.is_configured:
+                raise RuntimeError("Alpaca API keys not configured")
+            self._stock_data = StockHistoricalDataClient(self.api_key, self.secret_key)
+        return self._stock_data
+
+    @property
+    def crypto_data(self) -> CryptoHistoricalDataClient:
+        if self._crypto_data is None:
+            self._crypto_data = CryptoHistoricalDataClient(self.api_key, self.secret_key)
+        return self._crypto_data
+
+    def _latest_price(self, symbol: str, alpaca_symbol: str) -> float:
+        """Fetch the current market price via the Data API.
+
+        NOTE: TradingClient has no get_last_trade/get_last_quote — those methods
+        live on StockHistoricalDataClient/CryptoHistoricalDataClient. A previous
+        version called them on the wrong client, which raised AttributeError on
+        every call; the callers' bare except swallowed it silently and always
+        traded on the stale signal price instead of a fresh one (root cause of
+        stop_loss/base_price rejections when the market had moved since the
+        signal was generated). Raises on failure — callers must NOT trade on a
+        price they couldn't verify.
+        """
+        if _is_crypto(symbol):
+            req = CryptoLatestTradeRequest(symbol_or_symbols=alpaca_symbol)
+            trade = self.crypto_data.get_crypto_latest_trade(req)[alpaca_symbol]
+        else:
+            req = StockLatestTradeRequest(symbol_or_symbols=alpaca_symbol)
+            trade = self.stock_data.get_stock_latest_trade(req)[alpaca_symbol]
+        return float(trade.price)
 
     def get_account_summary(self) -> dict:
         try:
@@ -352,11 +391,10 @@ class AlpacaBroker:
         notional = shares * entry
 
         # ── Price alignment: re-fetch current market price ──
-        # Strategies may use stale entry prices from yfinance. Align with
-        # real market price to avoid Alpaca rejecting orders (SL/TP mismatch).
+        # Strategies may use stale entry prices. Align with real market price
+        # to avoid Alpaca rejecting orders (SL/TP mismatch).
         try:
-            latest_trade = self.trading.get_last_trade(alpaca_symbol)
-            latest_price = float(latest_trade.price)
+            latest_price = self._latest_price(symbol, alpaca_symbol)
             if latest_price <= 0:
                 latest_price = entry
             price_diff_pct = abs(entry - latest_price) / latest_price if latest_price > 0 else 0
@@ -385,7 +423,12 @@ class AlpacaBroker:
                 notional = shares * entry
                 logger.info(f"Price aligned: {symbol} entry ${entry:.2f}, SL ${sl:.2f}, TP ${tp:.2f}")
         except Exception as e:
-            logger.debug(f"Price alignment skipped for {symbol}: {e}")
+            # Fail closed: an unverified stale price is exactly what caused past
+            # order rejections (submitting a SL computed against an old entry
+            # while the market had already moved past it). Don't trade blind.
+            logger.warning(f"Price alignment failed for {symbol}, skipping trade: {e}")
+            return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                               False, f"Price alignment failed: {e}")
 
         # ── Risk guard: portfolio-level checks ──
         risk_msg = self._check_portfolio_risk(alpaca_symbol, notional, equity)
@@ -434,14 +477,42 @@ class AlpacaBroker:
                     filled_qty = float(filled_order.filled_qty)
                     filled_price = float(filled_order.filled_avg_price or entry)
 
+                    # Alpaca deducts crypto trading fees in-kind, so the qty actually
+                    # credited to the account is slightly less than filled_qty on the
+                    # order itself — using filled_qty for the SL/TP qty caused
+                    # "insufficient balance" rejections (confirmed 2026-07-16: order
+                    # reported 2653.29 filled, only 2646.66 actually available). Use
+                    # the real position qty for every order placed after the fill.
+                    try:
+                        # get_open_position wants the no-separator form ('XRPUSD'),
+                        # not the order-side format with a slash ('XRP/USD').
+                        actual_qty = abs(float(
+                            self.trading.get_open_position(_normalize_symbol(alpaca_symbol)).qty
+                        ))
+                        if actual_qty > 0:
+                            filled_qty = actual_qty
+                    except Exception as e:
+                        logger.warning(f"Could not confirm actual {alpaca_symbol} position qty, "
+                                       f"using order's filled_qty: {e}")
+
                     # Place stop-loss order — if this fails, CLOSE immediately
+                    # NOTE: Alpaca crypto does not support a plain "stop" order type
+                    # (market-on-trigger) — only stop_limit. A previous version used
+                    # StopOrderRequest here, which Alpaca rejected on every crypto SL
+                    # with "invalid order type for crypto order", forcing an immediate
+                    # safety close of every crypto position right after entry.
                     sl_placed = False
                     try:
-                        sl_req = StopOrderRequest(
+                        precision = 4 if sl < 1.0 else 2
+                        # Limit a bit below the stop so the order can still fill if
+                        # price gaps through the stop level (stop_limit needs both).
+                        sl_limit = sl * 0.995
+                        sl_req = StopLimitOrderRequest(
                             symbol=alpaca_symbol,
                             qty=filled_qty,
                             side=OrderSide.SELL,
-                            stop_price=round(sl, 2),
+                            stop_price=round(sl, precision),
+                            limit_price=round(sl_limit, precision),
                             time_in_force=TimeInForce.GTC,
                         )
                         self.trading.submit_order(sl_req)
@@ -490,9 +561,7 @@ class AlpacaBroker:
                 qty = max(1, round(shares))
                 # Fetch latest price to align SL/TP with current market
                 try:
-                    pos = self.get_open_positions()
-                    latest_price = float(self.trading.get_last_quote(alpaca_symbol).ask_price or
-                                         self.trading.get_last_trade(alpaca_symbol).price)
+                    latest_price = self._latest_price(symbol, alpaca_symbol)
                     if direction == 'SELL':
                         tp = min(tp, latest_price - 0.01)
                         sl = max(sl, latest_price + 0.01)
@@ -505,8 +574,10 @@ class AlpacaBroker:
                         if tp <= sl:
                             return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
                                                False, "SL/TP too tight after price move")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Final price check failed for {symbol}, skipping trade: {e}")
+                    return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
+                                       False, f"Final price check failed: {e}")
                 precision = 4 if tp < 1.0 else 2
                 # Swing trades (1d) use GTC and 2x wider SL/TP to absorb daily volatility
                 tif = TimeInForce.GTC if interval == '1d' else TimeInForce.DAY

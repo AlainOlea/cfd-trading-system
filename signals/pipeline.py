@@ -118,6 +118,11 @@ class UnifiedPipeline:
         self.manager = SignalManager()
         self.notifier = TelegramNotifier()
         self._tfm_results: dict = {}
+        # Cache of loaded XGBoostPredictor instances, keyed by (model_name, interval).
+        # Without this, _apply_ml() reloaded the same cross-sectional model from
+        # disk once per ticker (19x redundant deserialization per run).
+        self._ml_cache: dict[tuple[str, str], object] = {}
+        self._ml_cache_lock = threading.Lock()
         # Shared data cache — populated by _fetch_data() during run_all(), cleared at
         # start of each run. Lets TimesFM reuse data already fetched by the pipeline
         # instead of making a separate API call.
@@ -548,17 +553,31 @@ class UnifiedPipeline:
             )
 
     def _apply_ml(self, ticker: str, interval: str, df: pd.DataFrame) -> dict | None:
-        """Apply XGBoost prediction (prefers cross-sectional model, falls back to per-ticker)."""
+        """Apply XGBoost prediction (prefers cross-sectional model, falls back to per-ticker).
+
+        Loaded predictors are cached per (model_name, interval) on the pipeline
+        instance — the cross-sectional 'all_tickers' model is shared by every
+        ticker in a run, so it's loaded from disk once instead of once per ticker.
+        """
         try:
             from models.xgboost_model import XGBoostPredictor
-            predictor = XGBoostPredictor(confidence_threshold=0.55)
             # Try cross-sectional model first, then per-ticker
             for model_name in ['all_tickers', ticker]:
-                try:
-                    predictor.load(model_name, interval)
+                cache_key = (model_name, interval)
+                predictor = self._ml_cache.get(cache_key)
+                if predictor is None:
+                    with self._ml_cache_lock:
+                        predictor = self._ml_cache.get(cache_key)
+                        if predictor is None:
+                            candidate = XGBoostPredictor(confidence_threshold=0.55)
+                            try:
+                                candidate.load(model_name, interval)
+                            except FileNotFoundError:
+                                continue
+                            predictor = candidate
+                            self._ml_cache[cache_key] = predictor
+                if predictor is not None:
                     return predictor.predict_next(df)
-                except FileNotFoundError:
-                    continue
             logger.debug(f"XGBoost not available for {ticker} {interval}")
             return None
         except Exception as e:

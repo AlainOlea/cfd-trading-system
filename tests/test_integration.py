@@ -98,10 +98,9 @@ class TestBrokerPlaceSignal:
             mock_orders.append(order)
         b._trading.get_orders.return_value = mock_orders
 
-        # Mock get_last_trade (price alignment) - return None so code falls back to signal entry
-        mock_trade = MagicMock()
-        mock_trade.price = None
-        b._trading.get_last_trade.return_value = mock_trade
+        # Mock price alignment to match the default signal entry (550.0) so it's a
+        # no-op; tests using a different entry (e.g. crypto) override this directly.
+        b._latest_price = MagicMock(return_value=550.0)
 
         return b
 
@@ -162,6 +161,7 @@ class TestBrokerPlaceSignal:
 
     def test_crypto_market_order_placed(self):
         b = self._broker()
+        b._latest_price = MagicMock(return_value=3500)
         # Mock filled order
         filled = MagicMock()
         filled.status = 'filled'
@@ -203,8 +203,8 @@ class TestBrokerPlaceSignal:
         # Bracket order: stop_loss and take_profit are objects with attributes
         sl_price = call_args.stop_loss.stop_price
         tp_price = call_args.take_profit.limit_price
-        # SL/TP should be widened for swing (>1.5% SL, >3% TP)
-        assert sl_price < 550 * 0.98  # >2% SL
+        # SL/TP should be widened for swing (floor: 1.5% SL, 3% TP)
+        assert sl_price <= 550 * 0.985  # >=1.5% SL
         assert tp_price > 550 * 1.02  # >2% TP
 
 
@@ -641,10 +641,8 @@ class TestCryptoSafetyClose:
         b._trading.get_all_positions.return_value = []
         b._trading.get_orders.return_value = []
 
-        # Mock get_last_trade - return price matching entry to avoid price alignment skip
-        mock_trade = MagicMock()
-        mock_trade.price = 3500
-        b._trading.get_last_trade.return_value = mock_trade
+        # Mock price alignment - return price matching entry to avoid triggering realignment
+        b._latest_price = MagicMock(return_value=3500)
 
         # First call: market order fills
         filled = MagicMock()
@@ -684,10 +682,8 @@ class TestCryptoSafetyClose:
         b._trading.get_all_positions.return_value = []
         b._trading.get_orders.return_value = []
 
-        # Mock get_last_trade - return price matching entry to avoid price alignment skip
-        mock_trade = MagicMock()
-        mock_trade.price = 3500
-        b._trading.get_last_trade.return_value = mock_trade
+        # Mock price alignment - return price matching entry to avoid triggering realignment
+        b._latest_price = MagicMock(return_value=3500)
 
         filled = MagicMock()
         filled.status = 'filled'

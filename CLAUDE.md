@@ -65,13 +65,22 @@ tests/                      # 162 tests (all passing)
 - Confluence: Multi-timeframe scoring (0-5 stars)
 
 ### Paper Trading Automation
-Windows Task Scheduler ejecuta `run_paper_hourly.ps1`/`run_paper_daily.ps1` (raíz del repo),
-que invocan `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper-trade` dentro de WSL:
+Windows Task Scheduler ejecuta `powershell.exe -File "\\wsl.localhost\Ubuntu\...\run_paper_*.ps1"`
+directo sobre los `.ps1` del repo (vía ruta UNC) — el repo es la única fuente de verdad; cualquier
+cambio commiteado a un `run_paper_*.ps1` aplica en la siguiente corrida sin tocar nada en Windows.
+Cada `.ps1` hace `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper-trade` dentro de WSL:
 
 | Task | Schedule | Orders |
 |------|----------|--------|
-| `CFD Paper Hourly` | Mon-Fri, 07:00-15:59 ET, 1h | DAY (SL 0.5%, TP 1%) |
-| `CFD Paper Daily` | Mon-Fri, 07:00 ET, 1d | GTC (SL 1.5%, TP 3%) |
+| `CFD Paper Hourly` | Mon-Fri, 07:00-15:59 ET, cada 1h, `--interval 1h` | DAY (SL 0.5%, TP 1%) |
+| `CFD Paper Daily` | Mon-Fri, 07:00 ET, `--interval 1d` | GTC (SL 1.5%, TP 3%) |
+| `CFD Paper 1min` | Mon-Fri, 07:00-15:59 ET, cada 30min (:00/:30), `--interval 1m` | DAY (SL/TP scalping por estrategia) |
+
+Nota histórica (corregida 2026-07-15): hasta esta fecha las tareas de Windows en realidad
+ejecutaban `.bat` con el comando completo hardcodeado, fuera del repo — cualquier cambio a los
+`.ps1` nunca se aplicaba en producción (así se coló silenciosamente `--min-confluence 2` en vez
+de 3 durante días). Se reconfiguraron las 3 tareas para apuntar directo al `.ps1` vía UNC; los
+`.bat` viejos quedan como respaldo temporal, ya no se usan.
 
 ### Strategies
 | Strategy | Type | Signal | SL | TP | Regime filter |
@@ -136,6 +145,9 @@ reversion-to-bb_middle target and was previously overwriting it for every 1m/1h 
 - NO usar yfinance para produccion critica (se rompe frecuentemente)
 - NO commitear .env, API keys, modelos entrenados, ni data/raw/*.csv
 - NO usar `live_signals.py`, `live_signals_ensemble.py` - DEPRECATED (usar `pipeline`)
-- NO renombrar ni mover `run_paper_hourly.ps1`, `run_paper_daily.ps1`, `setup_tasks.ps1` (raíz
-  del repo) — están conectados a tareas reales de Windows Task Scheduler (`CFD Paper Hourly`,
-  `CFD Paper Daily`); moverlos rompe la automatización sin ningún error visible en el repo
+- NO renombrar ni mover `run_paper_hourly.ps1`, `run_paper_daily.ps1`, `run_paper_1min.ps1`,
+  `setup_tasks.ps1` (raíz del repo) — las tareas reales de Windows Task Scheduler (`CFD Paper
+  Hourly`, `CFD Paper Daily`, `CFD Paper 1min`) las ejecutan directo por ruta UNC
+  (`\\wsl.localhost\Ubuntu\...`); renombrar o mover el archivo rompe la automatización sin
+  ningún error visible en el repo (la tarea de Windows fallaría silenciosamente al no encontrar
+  el archivo en la ruta esperada)
