@@ -151,3 +151,4 @@ reversion-to-bb_middle target and was previously overwriting it for every 1m/1h 
   (`\\wsl.localhost\Ubuntu\...`); renombrar o mover el archivo rompe la automatización sin
   ningún error visible en el repo (la tarea de Windows fallaría silenciosamente al no encontrar
   el archivo en la ruta esperada)
+- NO incluir firma de Claude (`Co-Authored-By`/`Claude-Session`) en los mensajes de commit

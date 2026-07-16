@@ -74,15 +74,16 @@ class TimesFMPredictor:
         except ImportError:
             raise ImportError("timesfm not installed. Run: pip install 'timesfm[torch]'")
 
-        # If TensorFlow is already loaded (by other models in this package),
-        # move it off the GPU so its CUDA context doesn't block PyTorch's
-        # cuTLASS/mem-efficient attention kernels.
-        try:
-            import tensorflow as tf
-            tf.config.set_visible_devices([], "GPU")
-            logger.debug("TensorFlow GPU disabled — TimesFM using PyTorch/CUDA")
-        except Exception:
-            pass
+        # NOTE: this used to defensively `import tensorflow` here and disable its
+        # GPU access, to stop its CUDA context from blocking PyTorch's kernels —
+        # a leftover from the retired TF-based LSTM+Transformer ensemble. Nothing
+        # in the live pipeline uses TensorFlow anymore (2026-07-16), and the mere
+        # import triggered TF's GPU device registration on every run, which on
+        # this RTX 5060 (compute capability 12.0a, not yet in TF's prebuilt CUDA
+        # kernels) printed a "JIT-compiling from PTX, could take 30 minutes or
+        # longer" warning every single run (in practice ~3s, but alarming in
+        # logs). If TensorFlow is reintroduced for a future strategy/audit, this
+        # guard should come back too — until then, importing it here does nothing.
 
         logger.info("Loading TimesFM 2.5 (200M) — first call downloads ~500MB if not cached")
         self._model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(

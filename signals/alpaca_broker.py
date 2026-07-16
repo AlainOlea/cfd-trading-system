@@ -99,6 +99,7 @@ class AlpacaBroker:
         self._crypto_data: CryptoHistoricalDataClient | None = None
         self._session_high_equity: float = 0.0
         self._halted: bool = False
+        self._shortable_cache: dict[str, bool] = {}
 
     @property
     def is_configured(self) -> bool:
@@ -125,6 +126,23 @@ class AlpacaBroker:
         if self._crypto_data is None:
             self._crypto_data = CryptoHistoricalDataClient(self.api_key, self.secret_key)
         return self._crypto_data
+
+    def _is_shortable(self, alpaca_symbol: str) -> bool:
+        """Check whether a stock/ETF can be sold short on this account.
+
+        Cached per symbol for the life of the broker instance — shortability
+        doesn't change within a run and this avoids an extra API call on
+        every SELL signal. Fails open (assumes shortable) if the lookup
+        itself errors, so a transient API issue doesn't block trading.
+        """
+        if alpaca_symbol not in self._shortable_cache:
+            try:
+                asset = self.trading.get_asset(alpaca_symbol)
+                self._shortable_cache[alpaca_symbol] = bool(asset.shortable)
+            except Exception as e:
+                logger.warning(f"Could not check shortability for {alpaca_symbol}, assuming yes: {e}")
+                self._shortable_cache[alpaca_symbol] = True
+        return self._shortable_cache[alpaca_symbol]
 
     def _latest_price(self, symbol: str, alpaca_symbol: str) -> float:
         """Fetch the current market price via the Data API.
@@ -449,6 +467,13 @@ class AlpacaBroker:
                 if sl <= entry or tp >= entry:
                     return TradeResult(symbol, direction, shares, entry, sl, tp, conf,
                                        False, f"SL/TP on wrong side of entry (SELL: TP<{entry}<SL)")
+                if not is_crypto and not self._is_shortable(alpaca_symbol):
+                    # Some ETFs (e.g. USO) are permanently non-shortable on this
+                    # account. Fail gracefully here instead of letting Alpaca
+                    # reject the order after we've already spent a Telegram
+                    # notification on a SELL signal that could never execute.
+                    return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
+                                       False, f"{symbol} is not shortable on this account")
 
             if is_crypto:
                 if direction == 'SELL':

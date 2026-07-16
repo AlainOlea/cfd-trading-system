@@ -808,7 +808,10 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
 
     click.echo(f"\n  PAPER TRADING MODE")
     click.echo(f"  {'=' * 50}")
-    click.echo(f"  Interval:        {interval} {'(swing)' if interval == '1d' else '(intraday)' if interval == '1h' else '(mixed - not recommended for cron)'}")
+    _interval_label = {
+        '1d': '(swing)', '1h': '(intraday)', '1m': '(scalping)',
+    }.get(interval, '(mixed - not recommended for cron)')
+    click.echo(f"  Interval:        {interval} {_interval_label}")
     click.echo(f"  Min confluence:  {min_confluence}/5 stars")
     click.echo(f"  Min confidence:  {min_confidence:.0f}%")
     click.echo(f"  Dry run:         {'YES (no orders placed)' if dry_run else 'No (live paper trades)'}")
@@ -906,10 +909,18 @@ def paper_trade(category, ticker, interval, no_ml, no_news, no_telegram,
         if r.confluence_score < min_confluence:
             skipped += 1
             _mark_skip(r, 'below_stars')
+            click.echo(
+                f"  [SKIP] {r.ticker} {r.technical_signal.direction} — "
+                f"below_stars ({r.confluence_score}/5 < {min_confluence})"
+            )
             continue
         if r.final_confidence * 100 < min_confidence:
             skipped += 1
             _mark_skip(r, 'below_confidence')
+            click.echo(
+                f"  [SKIP] {r.ticker} {r.technical_signal.direction} — "
+                f"below_confidence ({r.final_confidence:.0%} < {min_confidence:.0f}%)"
+            )
             continue
 
         # Signal cooldown: skip if same ticker+direction traded recently.
