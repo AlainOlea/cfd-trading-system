@@ -72,15 +72,23 @@ Cada `.ps1` hace `wsl -d Ubuntu --exec bash -c "..."` para correr `main.py paper
 
 | Task | Schedule | Orders |
 |------|----------|--------|
-| `CFD Paper Hourly` | Mon-Fri, 07:00-15:59 ET, cada 1h, `--interval 1h` | DAY (SL 0.5%, TP 1%) |
+| `CFD Paper Hourly` | Mon-Fri, 07:00-15:59 ET, cada 1h, `--interval 1h` | GTC (SL 0.5%, TP 1%) |
 | `CFD Paper Daily` | Mon-Fri, 07:00 ET, `--interval 1d` | GTC (SL 1.5%, TP 3%) |
-| `CFD Paper 1min` | Mon-Fri, 07:00-15:59 ET, cada 30min (:00/:30), `--interval 1m` | DAY (SL/TP scalping por estrategia) |
+| `CFD Paper 1min` | Mon-Fri, 07:00-15:59 ET, cada 30min (:00/:30), `--interval 1m` | GTC (SL/TP scalping por estrategia) |
 
 Nota histórica (corregida 2026-07-15): hasta esta fecha las tareas de Windows en realidad
 ejecutaban `.bat` con el comando completo hardcodeado, fuera del repo — cualquier cambio a los
 `.ps1` nunca se aplicaba en producción (así se coló silenciosamente `--min-confluence 2` en vez
 de 3 durante días). Se reconfiguraron las 3 tareas para apuntar directo al `.ps1` vía UNC; los
 `.bat` viejos quedan como respaldo temporal, ya no se usan.
+
+Nota (corregida 2026-07-28): `CFD Paper Hourly`/`1min` usaban TIF `DAY` para el bracket
+completo (entrada + SL + TP). Alpaca hace que las patas de SL/TP hereden el TIF de la orden
+padre, así que si ninguna se tocaba antes del cierre del mercado, ambas expiraban/cancelaban
+solas — la posición (ya llena) quedaba abierta sin ninguna protección, y `has_position()`
+evita que corridas futuras la vuelvan a tocar. Confirmado en cuenta real: AAPL/AMZN/DIA/GLD/
+GOOGL llevaban entre 13 y 40 días abiertas con 0 órdenes pendientes. Ahora todos los
+intervalos usan GTC (`signals/alpaca_broker.py:place_signal`), igual que ya hacía 1d.
 
 ### Strategies
 | Strategy | Type | Signal | SL | TP | Regime filter |

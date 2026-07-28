@@ -498,27 +498,25 @@ class AlpacaBroker:
                     if filled_order.status in ('filled', 'expired', 'canceled'):
                         break
 
-                if filled_order.status == 'filled' and filled_order.filled_qty:
-                    filled_qty = float(filled_order.filled_qty)
-                    filled_price = float(filled_order.filled_avg_price or entry)
+                # Don't gate SL/TP placement on the order object's status alone — it can
+                # still read as non-'filled' after the poll window even though the fill
+                # already happened (confirmed 2026-07-15: an ETH-USD buy never showed
+                # 'filled' here, so this whole block was skipped and the position sat
+                # open with no SL/TP for weeks). The position itself is authoritative.
+                filled_qty = 0.0
+                filled_price = entry
+                try:
+                    # get_open_position wants the no-separator form ('XRPUSD'),
+                    # not the order-side format with a slash ('XRP/USD').
+                    position = self.trading.get_open_position(_normalize_symbol(alpaca_symbol))
+                    filled_qty = abs(float(position.qty))
+                    filled_price = float(position.avg_entry_price or entry)
+                except Exception:
+                    if filled_order.status == 'filled' and filled_order.filled_qty:
+                        filled_qty = float(filled_order.filled_qty)
+                        filled_price = float(filled_order.filled_avg_price or entry)
 
-                    # Alpaca deducts crypto trading fees in-kind, so the qty actually
-                    # credited to the account is slightly less than filled_qty on the
-                    # order itself — using filled_qty for the SL/TP qty caused
-                    # "insufficient balance" rejections (confirmed 2026-07-16: order
-                    # reported 2653.29 filled, only 2646.66 actually available). Use
-                    # the real position qty for every order placed after the fill.
-                    try:
-                        # get_open_position wants the no-separator form ('XRPUSD'),
-                        # not the order-side format with a slash ('XRP/USD').
-                        actual_qty = abs(float(
-                            self.trading.get_open_position(_normalize_symbol(alpaca_symbol)).qty
-                        ))
-                        if actual_qty > 0:
-                            filled_qty = actual_qty
-                    except Exception as e:
-                        logger.warning(f"Could not confirm actual {alpaca_symbol} position qty, "
-                                       f"using order's filled_qty: {e}")
+                if filled_qty > 0:
 
                     # Place stop-loss order — if this fails, CLOSE immediately
                     # NOTE: Alpaca crypto does not support a plain "stop" order type
@@ -578,9 +576,10 @@ class AlpacaBroker:
                                        True, f"Crypto: {filled_qty:.4f} units, SL/TP placed")
                 else:
                     status = filled_order.status if hasattr(filled_order, 'status') else 'unknown'
-                    logger.warning(f"Crypto order status: {status}")
+                    logger.error(f"CRYPTO {alpaca_symbol}: no fill confirmed after 15s poll "
+                                 f"(order status={status}) — treating as failed, no SL/TP to place")
                     return TradeResult(symbol, direction, 0, entry, sl, tp, conf,
-                                       True, f"Crypto order submitted (status={status})")
+                                       False, f"Crypto order not filled (status={status})")
             else:
                 # Stocks/ETFs: whole shares with bracket order for auto SL/TP
                 qty = max(1, round(shares))
@@ -604,8 +603,13 @@ class AlpacaBroker:
                     return TradeResult(symbol, direction, qty, entry, sl, tp, conf,
                                        False, f"Final price check failed: {e}")
                 precision = 4 if tp < 1.0 else 2
-                # Swing trades (1d) use GTC and 2x wider SL/TP to absorb daily volatility
-                tif = TimeInForce.GTC if interval == '1d' else TimeInForce.DAY
+                # GTC for all intervals: DAY brackets let the SL/TP legs (which inherit
+                # the parent's tif) expire uncancelled at market close if neither level
+                # was touched that day, leaving the already-filled position with zero
+                # protection — confirmed 2026-07-2x on AAPL/AMZN/DIA/GLD/GOOGL, some
+                # naked for 30+ days. GTC keeps SL/TP live until one of them triggers,
+                # matching the swing (1d) behavior that never had this problem.
+                tif = TimeInForce.GTC
                 order = MarketOrderRequest(
                     symbol=alpaca_symbol,
                     qty=qty,
