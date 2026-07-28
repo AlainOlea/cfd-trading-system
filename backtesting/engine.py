@@ -93,15 +93,25 @@ class BacktestEngine:
                 for idx in technical_signals.index:
                     self._process_ml_row(idx, signals_df, df, predictor, delay_sec)
 
-        # Convert signals to boolean entry/exit arrays
+        # Long entries (BUY) / short entries (SELL) — exits are via sl_stop/tp_stop
+        # bracket only (matches real paper trading), never on opposite signal:
+        # a signal-based exit closes winners and losers at whatever price the
+        # next opposite signal happens to appear, inflating returns with
+        # positions that a real bracket order would have already stopped out of.
         entries = signals_df['signal'] == 'BUY'
-        exits = signals_df['signal'] == 'SELL'
+        short_entries = signals_df['signal'] == 'SELL'
+        sl_stop, tp_stop = self._stop_pct_arrays(signals_df, entries, short_entries)
 
         # Build portfolio with VectorBT
         portfolio = vbt.Portfolio.from_signals(
             close=signals_df['close'],
+            open=signals_df['open'],
+            high=signals_df['high'],
+            low=signals_df['low'],
             entries=entries,
-            exits=exits,
+            short_entries=short_entries,
+            sl_stop=sl_stop,
+            tp_stop=tp_stop,
             init_cash=self.initial_capital,
             fees=self.commission,
             slippage=self.slippage,
@@ -144,10 +154,18 @@ class BacktestEngine:
             mask &= (result.signals_df.index <= end_date)
 
         filtered_signals = result.signals_df[mask]
+        entries = filtered_signals['signal'] == 'BUY'
+        short_entries = filtered_signals['signal'] == 'SELL'
+        sl_stop, tp_stop = self._stop_pct_arrays(filtered_signals, entries, short_entries)
         result.portfolio = vbt.Portfolio.from_signals(
             close=filtered_signals['close'],
-            entries=filtered_signals['signal'] == 'BUY',
-            exits=filtered_signals['signal'] == 'SELL',
+            open=filtered_signals['open'],
+            high=filtered_signals['high'],
+            low=filtered_signals['low'],
+            entries=entries,
+            short_entries=short_entries,
+            sl_stop=sl_stop,
+            tp_stop=tp_stop,
             init_cash=self.initial_capital,
             fees=self.commission,
             slippage=self.slippage,
@@ -155,6 +173,31 @@ class BacktestEngine:
         )
         result.signals_df = filtered_signals
         return result
+
+    @staticmethod
+    def _stop_pct_arrays(
+        signals_df: pd.DataFrame,
+        entries: pd.Series,
+        short_entries: pd.Series,
+    ) -> tuple[pd.Series, pd.Series]:
+        """Per-entry SL/TP distance (as a fraction of entry price) for VectorBT's
+        sl_stop/tp_stop bracket exit, taken from the strategy's own stop_loss/
+        take_profit columns (same distances used by real paper trading orders).
+        """
+        sl_pct = pd.Series(np.nan, index=signals_df.index)
+        tp_pct = pd.Series(np.nan, index=signals_df.index)
+
+        close = signals_df['close']
+        sl = signals_df['stop_loss']
+        tp = signals_df['take_profit']
+
+        sl_pct[entries] = (close[entries] - sl[entries]) / close[entries]
+        tp_pct[entries] = (tp[entries] - close[entries]) / close[entries]
+
+        sl_pct[short_entries] = (sl[short_entries] - close[short_entries]) / close[short_entries]
+        tp_pct[short_entries] = (close[short_entries] - tp[short_entries]) / close[short_entries]
+
+        return sl_pct, tp_pct
 
     def _process_ml_row(self, idx, signals_df, df, predictor, delay_sec):
         """Internal helper to process a single signal row with ML."""
