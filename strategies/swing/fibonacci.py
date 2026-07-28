@@ -40,7 +40,7 @@ class FibonacciStrategy(BaseStrategy):
         return 'fibonacci'
 
     @property
-    def timeframe(self) -> str:
+    def default_timeframe(self) -> str:
         return '1d'
 
     @property

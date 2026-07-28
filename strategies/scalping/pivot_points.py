@@ -39,7 +39,7 @@ class PivotPointsStrategy(BaseStrategy):
         return 'pivot_points'
 
     @property
-    def timeframe(self) -> str:
+    def default_timeframe(self) -> str:
         return '1h'
 
     @property

@@ -43,9 +43,20 @@ class BaseStrategy(ABC):
         """Strategy identifier (e.g. 'macd_vwap')."""
 
     @property
-    @abstractmethod
     def timeframe(self) -> str:
-        """Recommended timeframe (e.g. '1m', '1d')."""
+        """Return the current interval if set, otherwise the default timeframe."""
+        if hasattr(self, '_interval') and self._interval:
+            return self._interval
+        return self.default_timeframe
+
+    @timeframe.setter
+    def timeframe(self, value: str):
+        self._interval = value
+
+    @property
+    def default_timeframe(self) -> str:
+        """Default/Recommended timeframe for this strategy."""
+        return '1h'
 
     @property
     @abstractmethod

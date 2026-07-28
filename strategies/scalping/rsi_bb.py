@@ -37,7 +37,7 @@ class RSIBBStrategy(BaseStrategy):
         return 'rsi_bb'
 
     @property
-    def timeframe(self) -> str:
+    def default_timeframe(self) -> str:
         return '1m'
 
     @property
