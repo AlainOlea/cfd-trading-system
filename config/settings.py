@@ -450,6 +450,11 @@ PIPELINE_TICKERS: list[TickerConfig] = [
     TickerConfig('SLV', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     TickerConfig('USO', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb', 'supertrend'], True, True, 2),
     TickerConfig('UNG', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
+    # New commodities activated 2026-07-28 (edge confirmado con backtest SL/TP real,
+    # >=15 trades y Sharpe>0.5 en 1h; BNO/PPLT excluidas por falta de edge, WEAT dudosa)
+    TickerConfig('CORN', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'supertrend'], True, True, 2),
+    TickerConfig('CPER', 'commodities', ['1d', '1h', '1m'], ['supertrend'], True, True, 2),
+    TickerConfig('DBA', 'commodities', ['1d', '1h', '1m'], ['macd_vwap', 'supertrend'], True, True, 2),
     # Stocks
     TickerConfig('AAPL', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),
     TickerConfig('NVDA', 'stocks', ['1d', '1h', '1m'], ['macd_vwap', 'rsi_bb'], True, True, 2),

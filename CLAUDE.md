@@ -100,8 +100,9 @@ intervalos usan GTC (`signals/alpaca_broker.py:place_signal`), igual que ya hac�
 | Pivot Points | Scalping (mean reversion) | Rebote S1/S2, rechazo R1/R2 | next level | PP | `require_ranging` |
 | Fibonacci | Swing | Pullback a 38.2/50/61.8% en tendencia (SMA50 + impulso low→high ordenado + RSI) | tras 78.6% | swing extreme | none (ADX suprime pullbacks) |
 
-Estado de activacion (bateria 19 tickers con salidas bracket SL/TP, 2026-07-15):
-- SuperTrend: ACTIVA solo en MSFT y USO (evidencia robusta; negativa en cripto/AMZN/META)
+Estado de activacion (bateria con salidas bracket SL/TP, 2026-07-15; commodities 2026-07-28):
+- SuperTrend: ACTIVA en MSFT, USO, y CORN/CPER/DBA (commodities, 1h Sharpe 1.4-2.6, 76-80
+  trades; evidencia robusta). Negativa en cripto/AMZN/META.
 - Pivot Points: en STRATEGY_MAP pero NO activa (negativa en 17/19 tickers con brackets reales)
 - Fibonacci: en STRATEGY_MAP pero NO activa (mediocre tras corregir ADX/orden temporal)
 Nuevas estrategias: usar la skill `/strategy-research` — exige backtest en TODOS los
@@ -120,9 +121,14 @@ reversion-to-bb_middle target and was previously overwriting it for every 1m/1h 
 - `MAX_CONCURRENT_POSITIONS=10`, `CRYPTO_MAX_AGGREGATE=10%`, `CRYPTO_MAX_SINGLE=3%`
 - Min confluence: 3 stars (default), min confidence: 60% (`paper-trade` default)
 
-## Tickers (19)
-**Stocks/ETFs**: SPY, QQQ, IWM, DIA, GLD, SLV, USO, UNG, AAPL, NVDA, MSFT, AMZN, GOOGL, META, TSLA
-**Crypto**: BTC-USD, ETH-USD, SOL-USD, XRP-USD
+## Tickers
+**Pipeline activo (22)** — los que operan en paper trading (`PIPELINE_TICKERS`):
+- **Stocks/ETFs**: SPY, QQQ, IWM, DIA, GLD, SLV, USO, UNG, AAPL, NVDA, MSFT, AMZN, GOOGL, META, TSLA
+- **Commodities nuevas (2026-07-28)**: CORN, CPER, DBA (con edge; SuperTrend/MACD+VWAP en 1h)
+- **Crypto**: BTC-USD, ETH-USD, SOL-USD, XRP-USD
+
+**Con data pero NO en pipeline**: BNO, PPLT, WEAT — fetched y en `DEFAULT_TICKERS`/modelo XGBoost,
+pero sin edge defendible en backtest (BNO/PPLT negativos, WEAT dudoso), así que no en `PIPELINE_TICKERS`.
 
 ## Code Style
 - Python 3.12+ con type hints, clases con docstrings
