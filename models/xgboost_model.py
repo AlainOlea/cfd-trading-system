@@ -109,7 +109,10 @@ class XGBoostTrader:
         self._test_close = None
         self._test_index = None
 
-    def build(self):
+    def build(self, n_classes: int = 2):
+        # Early stopping needs a metric matching the objective (multiclass ->
+        # mlogloss). Only enabled when train() supplies an eval_set below.
+        eval_metric = 'mlogloss' if n_classes > 2 else XGBOOST_CONFIG['eval_metric']
         self.model = xgb.XGBClassifier(
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
@@ -120,13 +123,15 @@ class XGBoostTrader:
             reg_alpha=self.reg_alpha,
             reg_lambda=self.reg_lambda,
             random_state=42,
-            eval_metric=XGBOOST_CONFIG['eval_metric'],
+            eval_metric=eval_metric,
+            early_stopping_rounds=XGBOOST_CONFIG.get('early_stopping_rounds'),
             verbosity=0,
         )
         logger.info(
             f"XGBoost built: {self.n_estimators} trees, depth={self.max_depth}, "
             f"lr={self.learning_rate}, min_child_weight={self.min_child_weight}, "
-            f"alpha={self.reg_alpha}, lambda={self.reg_lambda}"
+            f"alpha={self.reg_alpha}, lambda={self.reg_lambda}, "
+            f"early_stop={XGBOOST_CONFIG.get('early_stopping_rounds')}"
         )
 
     def prepare_data(self, df: pd.DataFrame, use_triple_barrier: bool = True) -> tuple:
@@ -288,28 +293,44 @@ class XGBoostTrader:
         return X_train, y_train, X_test, y_test
 
     def train(self, X_train, y_train, epochs: int = None) -> dict:
+        n_classes = len(np.unique(y_train))
         if self.model is None:
-            self.build()
+            self.build(n_classes=n_classes)
 
-        # Compute class weights to handle imbalanced labels
-        unique, counts = np.unique(y_train, return_counts=True)
-        n_samples = len(y_train)
+        # Carve a validation fold from train for early stopping. The final OOS
+        # test set (X_test) is untouched, so this only regularizes tree count —
+        # it never sees the true evaluation data.
+        from sklearn.model_selection import train_test_split
+        val_frac = XGBOOST_CONFIG.get('val_fraction', 0.15)
+        stratify = y_train if n_classes > 1 else None
+        X_fit, X_val, y_fit, y_val = train_test_split(
+            X_train, y_train, test_size=val_frac, random_state=42, stratify=stratify
+        )
+
+        # Compute class weights on the fit fold to handle imbalanced labels
+        unique, counts = np.unique(y_fit, return_counts=True)
+        n_samples = len(y_fit)
         sample_weights = np.ones(n_samples)
         for cls, count in zip(unique, counts):
             weight = n_samples / (len(unique) * count)
-            sample_weights[y_train == cls] = weight
+            sample_weights[y_fit == cls] = weight
 
         self.model.fit(
-            X_train, y_train,
+            X_fit, y_fit,
             sample_weight=sample_weights,
-            verbose=0
+            eval_set=[(X_val, y_val)],
+            verbose=False,
         )
 
-        train_pred = self.model.predict(X_train)
-        train_acc = (train_pred == y_train).mean()
+        best_iter = getattr(self.model, 'best_iteration', None)
+        train_pred = self.model.predict(X_fit)
+        train_acc = (train_pred == y_fit).mean()
 
-        logger.info(f"Training complete: accuracy={train_acc:.4f}")
-        return {'accuracy': train_acc}
+        logger.info(
+            f"Training complete: accuracy={train_acc:.4f}"
+            + (f", best_iteration={best_iter}/{self.n_estimators}" if best_iter is not None else "")
+        )
+        return {'accuracy': train_acc, 'best_iteration': best_iter}
 
     def evaluate(self, X_test, y_test) -> dict:
         if self.model is None:
@@ -505,20 +526,18 @@ class XGBoostPredictor:
                 direction = 'HOLD'
                 confidence = max(p_up, p_down)
         else:
-            # Binary: 0=down, 1=up
+            # Binary: 0=down, 1=up. Asymmetric band leaves a HOLD zone in the
+            # middle so low-conviction predictions don't force a trade.
             probability = float(proba[0, 1])
-            if probability > 0.55:
+            if probability > ML_SIGNAL_THRESHOLDS['buy_above']:
                 direction = 'BUY'
                 confidence = probability
-            elif probability < 0.45:
+            elif probability < ML_SIGNAL_THRESHOLDS['sell_below']:
                 direction = 'SELL'
                 confidence = 1 - probability
             else:
                 direction = 'HOLD'
                 confidence = max(probability, 1 - probability)
-            probability = proba[0, 1]
-            direction = 'BUY' if probability > 0.5 else 'SELL'
-            confidence = probability if probability > 0.5 else 1 - probability
 
         return {
             'direction': direction,

@@ -273,6 +273,8 @@ XGBOOST_CONFIG = {
     'reg_alpha': 0.1,
     'reg_lambda': 1.0,
     'eval_metric': 'logloss',
+    'early_stopping_rounds': 20,     # stop if validation logloss stalls 20 rounds
+    'val_fraction': 0.15,            # holdout carved from train for early stopping
 }
 
 # Triple-barrier label configuration (Lopez de Prado method)
