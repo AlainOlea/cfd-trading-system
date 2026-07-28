@@ -37,6 +37,12 @@ TICKERS = {
         'USO',      # Crude Oil
         'DBC',      # Commodities Index
         'UNG',      # Natural Gas
+        'CPER',     # Copper
+        'BNO',      # Brent Oil
+        'WEAT',     # Wheat
+        'CORN',     # Corn
+        'DBA',      # Agriculture basket
+        'PPLT',     # Platinum
     ],
     'crypto': [
         'BTC-USD',  # Bitcoin
@@ -57,7 +63,7 @@ TICKERS = {
 }
 
 # Default tickers for testing (expanded)
-DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD']
+DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA', 'BTC-USD', 'ETH-USD', 'SOL-USD', 'XRP-USD', 'CPER', 'BNO', 'WEAT', 'CORN', 'DBA', 'PPLT']
 
 # ============================================
 # TIMEFRAMES & DATES

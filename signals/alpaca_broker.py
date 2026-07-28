@@ -25,7 +25,8 @@ from alpaca.data.requests import StockLatestTradeRequest, CryptoLatestTradeReque
 
 logger = logging.getLogger(__name__)
 
-ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA'}
+ALPACA_STOCKS = {'SPY', 'QQQ', 'IWM', 'DIA', 'GLD', 'SLV', 'USO', 'UNG', 'AAPL', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'META', 'TSLA',
+                 'CPER', 'BNO', 'WEAT', 'CORN', 'DBA', 'PPLT'}
 ALPACA_CRYPTO = {'BTC-USD': 'BTC/USD', 'ETH-USD': 'ETH/USD', 'SOL-USD': 'SOL/USD', 'XRP-USD': 'XRP/USD'}
 MIN_POSITION_VALUE = 100.0    # Don't bother with trades smaller than $100
 
