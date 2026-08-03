@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "alpaca": {
+      "type": "local",
+      "command": [
+        "/home/alainolea/Proyectos/cfd-trading-system/venv/bin/alpaca-mcp-server",
+        "--env-file",
+        "/home/alainolea/Proyectos/cfd-trading-system/.env"
+      ],
+      "enabled": true
+    },
+    "tradingview": {
+      "type": "local",
+      "command": [
+        "/home/alainolea/Proyectos/cfd-trading-system/venv/bin/tradingview-mcp"
+      ],
+      "enabled": true
+    }
+  }
+}

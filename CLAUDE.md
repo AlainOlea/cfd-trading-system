@@ -24,6 +24,9 @@ pytest tests/ -v                    # correr tests
 - **TensorFlow**: 2.21.0 (GPU-accelerated, RTX 5060 + CUDA 12.9/cuDNN 9.19), **XGBoost**: Primary ML model
 - **VectorBT**: 0.28.4 (backtesting)
 - **alpaca-py**: Data API (free tier: IEX feed, 200 calls/min, 15-min delay)
+- **opencode MCPs** (proyecto): `alpaca` (alpaca-mcp-server) y `tradingview` (tradingview-mcp-server), instalados en el venv — config en `opencode.json` (raíz)
+- **Alpaca CLI**: `~/.local/bin/alpaca` (perfil paper autenticado en `~/.config/alpaca/profiles/`) — lo usa la skill `alpaca-trading-backtest`
+- **Skills opencode** (`.claude/skills/`): `strategy-research`, `alpaca-trading-backtest`
 
 ## Project Structure
 ```

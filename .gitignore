@@ -25,6 +25,7 @@ wheels/
 
 # Data files (too large for Git)
 data/raw/*.csv
+data/raw/fetch_metadata.json
 data/processed/*.csv
 *.pickle
 *.pkl
@@ -62,6 +63,7 @@ TODO.md
 Thumbs.db
 .env
 .env.local
+.env.viejo
 
 # Jupyter
 .ipynb_checkpoints/
