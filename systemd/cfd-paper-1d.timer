@@ -1,0 +1,10 @@
+[Unit]
+Description=CFD Trading System - 1d swing timer (once per market morning ET)
+
+[Timer]
+OnCalendar=Mon..Fri 07:00:00 America/New_York
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

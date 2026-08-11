@@ -1,0 +1,10 @@
+[Unit]
+Description=CFD Trading System - 1m scalping timer (every 15 min, market hours ET)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 09..15:00/15:00 America/New_York
+Persistent=true
+RandomizedDelaySec=15
+
+[Install]
+WantedBy=timers.target

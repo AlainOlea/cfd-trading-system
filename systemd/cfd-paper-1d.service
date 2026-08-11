@@ -1,0 +1,14 @@
+[Unit]
+Description=CFD Trading System - 1d swing signals (paper trade)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/alainolea/Proyectos/cfd-trading-system
+ExecStart=/home/alainolea/Proyectos/cfd-trading-system/venv/bin/cfd-trade paper-trade --interval 1d --no-news --min-confluence 3 --min-confidence 60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
