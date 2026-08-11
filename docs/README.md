@@ -55,7 +55,8 @@ docs/
 │
 └── research/
     ├── NORMALIZED_TIME_PROFILE.md
-    └── TIMESFM_DEEP_RESEARCH.md
+    ├── TIMESFM_DEEP_RESEARCH.md
+    └── MACRO_LIQUIDITY_INDICATORS.md   # 4 indicadores de liquidez macro + temporalidad
 ```
 (`quickstart/` is now empty — both its docs moved to `archive/` — and will disappear once git
 stops tracking any file under it.)
@@ -81,6 +82,7 @@ stops tracking any file under it.)
 - Signal replay / reliability analysis: `guides/SIGNAL_REPLAY_GUIDE.md`
 - News setup: `guides/NEWS_ANALYZER_SETUP.md`
 - Multi-timeframe approach: `guides/MULTIFREQ_TRADING_STRATEGY.md`
+- Macro liquidity overlay (Fed net liquidity, SOFR, MOVE, yen carry + timing): `research/MACRO_LIQUIDITY_INDICATORS.md`
 
 ### For Developers
 - Module reference: `reference/MODULES_API.md`
